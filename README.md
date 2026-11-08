@@ -1,4 +1,4 @@
-# Debian NAS
+# my-debnas · Debian NAS 控制台
 
 ![vibe coding](https://img.shields.io/badge/vibe_coding-AI_pair_programmed-ff69b4?style=flat-square)
 ![license](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)
