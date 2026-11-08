@@ -1,0 +1,27 @@
+{
+	admin off
+	auto_https off
+}
+
+# 局域网 HTTP 入口：手机不用装证书，直接 http://<主机>/ 登录
+# 只对私有网段放行，其余来源仍然 308 跳到 HTTPS
+:80 {
+	route {
+		@lan remote_ip 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 127.0.0.1/32 ::1 fc00::/7 fe80::/10
+		handle @lan {
+			reverse_proxy 127.0.0.1:8080
+		}
+		redir https://{host}{uri} 308
+	}
+}
+
+# 自签证书：openssl req -x509 ... -addext "subjectAltName=IP:<主机IP>"
+:443 {
+	tls /etc/caddy/debnas.crt /etc/caddy/debnas.key
+	encode gzip zstd
+	reverse_proxy 127.0.0.1:8080
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "sameorigin"
+	}
+}

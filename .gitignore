@@ -1,0 +1,14 @@
+# 不在公开仓库分发的资源（见 NOTICE / README“来源与致谢”）
+web/frontend/icons/snowluma.png
+
+# Python
+__pycache__/
+*.py[cod]
+
+# 系统 / 编辑器杂项
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

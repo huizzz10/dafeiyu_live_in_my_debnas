@@ -1,0 +1,84 @@
+my-debnas
+Copyright (C) 2026 my-debnas contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, version 3 of the License.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+==========================================================================
+来源与第三方组件
+==========================================================================
+
+本项目是个人重写，与上游 debnas 项目没有隶属关系；最初参考了它的
+NAS 思路与使用场景。
+
+- debnas
+  上游：https://github.com/kekylin/debnas
+  许可证：GPL-3.0
+  说明：本仓库按 GPL-3.0 分发；如果包含上游的衍生代码，GPL-3.0 的要求
+        同样适用。
+
+- Debian swirl
+  来源：https://www.debian.org/logos/
+  许可证：Debian Open Use Logo License
+  说明：手机顶栏 / 抽屉使用的 Debian 标志，文件为 web/frontend/icons/debian.svg
+
+- Cockpit / cockpit-file-sharing / cockpit-identities
+  上游：https://github.com/cockpit-project/cockpit
+        https://github.com/45Drives/cockpit-file-sharing
+        https://github.com/45Drives/cockpit-identities
+  许可证：Cockpit 为 LGPL-2.1；两个 45Drives 模块为 GPL-3.0。
+  说明：仅作为早期界面与交互参考；仓库不再包含这几个项目的代码或汉化层。
+
+- noVNC 1.6.0
+  上游：https://github.com/novnc/noVNC
+  许可证：核心库 MPL-2.0；HTML/CSS 为 BSD-2-Clause；图片为 CC-BY-SA-3.0；
+          vendor/pako 为 MIT。
+  说明：位于 web/frontend/novnc/；完整说明见该目录下的 LICENSE.txt、
+        LICENSE.MPL-2.0、LICENSE.pako.txt 和 COPYRIGHT。
+
+- xterm.js 6.0.0 / @xterm/addon-fit 0.11.0
+  上游：https://github.com/xtermjs/xterm.js
+  许可证：MIT
+  说明：位于 web/frontend/xterm/；打开终端时按需加载，许可证见该目录的
+        LICENSE 和 LICENSE.addon-fit。
+
+- Inter
+  上游：https://github.com/rsms/inter
+  许可证：SIL Open Font License 1.1
+  说明：位于 web/frontend/fonts/；许可证全文见 OFL-Inter.txt。
+
+- Noto Sans CJK SC（子集，重命名为 Debnas Sans SC）
+  上游：https://github.com/notofonts/noto-cjk
+  许可证：SIL Open Font License 1.1
+  说明：位于 web/frontend/fonts/；只保留 GB2312 一级 + UI 文案约 4142 字，
+        已重命名为 Debnas Sans SC；许可证全文见 OFL-NotoSansCJK.txt。
+
+- Debian 软件包
+  libvirt、QEMU、Samba、Caddy、smartmontools 等通过 apt 安装，不随本仓库
+  分发，遵循各自的许可证。
+
+==========================================================================
+未包含的第三方资源
+==========================================================================
+
+- HarmonyOS Sans SC
+  版权归华为。其字体许可对修改版和单独再分发有限制，因此本仓库不再包含
+  该字体的 woff2 子集。中文界面使用 Noto Sans CJK SC 的 OFL 子集；
+  子集之外的生僻字回退客户端系统字体。如需 HarmonyOS，请自行获取并遵守
+  华为的字体许可。
+
+- SnowLuma
+  SnowLuma 是第三方项目，采用源码可见、非商业许可，不是 OSI 开源许可。
+  本仓库不包含它的代码；公开仓库也不包含它的 logo。本地自用可以在
+  web/frontend/icons/snowluma.png 放一份（已在 .gitignore 中），由部署脚本
+  复制到静态目录；公开分发 logo 前需向项目作者确认授权。页面里只是把运行
+  SnowLuma 容器当成一个外部应用入口提及。

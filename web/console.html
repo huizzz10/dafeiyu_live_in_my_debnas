@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>虚拟机控制台</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▣</text></svg>" />
+<link rel="stylesheet" href="./fonts.css" />
+<link rel="stylesheet" href="./console.css" />
+</head>
+<body>
+<header class="bar">
+  <a class="back" href="/?view=vms" title="返回虚拟机列表" aria-label="返回">←</a>
+  <div class="vm-title">
+    <b id="vm-name">虚拟机控制台</b>
+    <span id="vm-sub">正在连接…</span>
+  </div>
+  <div class="tools">
+    <button id="btn-cad" class="tool" type="button" disabled>Ctrl+Alt+Del</button>
+    <button id="btn-full" class="tool" type="button">全屏</button>
+    <button id="btn-close" class="tool" type="button">断开</button>
+  </div>
+</header>
+
+<main class="stage">
+  <div id="screen" class="screen" tabindex="0"></div>
+  <div id="overlay" class="overlay">
+    <div class="overlay-card">
+      <div id="spinner" class="spinner" aria-hidden="true"></div>
+      <b id="overlay-title">正在连接…</b>
+      <p id="overlay-text" class="muted"></p>
+      <pre id="overlay-code" class="code" hidden></pre>
+      <div id="overlay-actions" class="overlay-actions"></div>
+      <p class="hint">提示：点击画面可捕获键盘；如果黑屏，先确认虚拟机已开机并有图形界面。</p>
+    </div>
+  </div>
+</main>
+
+<noscript><p class="noscript">需要启用 JavaScript 才能打开控制台。</p></noscript>
+<script type="module" src="./console.js"></script>
+</body>
+</html>

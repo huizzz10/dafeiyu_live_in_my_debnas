@@ -1,0 +1,186 @@
+/* 虚拟机网页控制台（独立页面，不依赖主界面主题） */
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --bg: #0b0b10;
+  --bar: #14141b;
+  --line: #2a2a36;
+  --text: #e9e8ef;
+  --muted: #9c9aab;
+  --accent: #a596ff;
+  --accent-ink: #17131f;
+  --danger: #ffb4ab;
+  --font: "Inter", "Debnas Sans SC", "Noto Sans SC", "PingFang SC",
+          "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+
+html, body { margin: 0; height: 100%; }
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 8px 14px;
+  background: var(--bar);
+  border-bottom: 1px solid var(--line);
+}
+
+.back {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 18px;
+  line-height: 1;
+  background: transparent;
+  transition: background .18s ease;
+}
+.back:hover { background: rgba(255, 255, 255, .08); }
+
+.vm-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.vm-title b {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vm-title span { font-size: 11.5px; color: var(--muted); }
+
+.tools { display: flex; align-items: center; gap: 6px; }
+.tool {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 11px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background .16s ease, opacity .16s ease;
+}
+.tool:hover { background: rgba(255, 255, 255, .08); }
+.tool:disabled { opacity: .35; cursor: default; }
+#btn-close { color: var(--danger); }
+
+.stage { position: relative; flex: 1; min-height: 0; background: var(--bg); }
+
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  outline: none;
+  cursor: default;
+}
+.screen canvas { display: block; }
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(8, 8, 12, .72);
+  backdrop-filter: blur(6px);
+}
+.overlay.is-hidden { display: none; }
+
+.overlay-card {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 26px 28px;
+  border-radius: 20px;
+  background: #16161f;
+  border: 1px solid var(--line);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+}
+.overlay-card b { font-size: 16px; }
+.overlay-card .muted { color: var(--muted); font-size: 12.5px; line-height: 1.65; margin: 0; }
+.overlay-card .hint { color: #6f6d7d; font-size: 11px; line-height: 1.6; margin: 4px 0 0; }
+
+.code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #0b0b10;
+  border: 1px solid var(--line);
+  color: #cfcbdf;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.overlay-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+
+.btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 17px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { filter: brightness(1.06); }
+.btn-text { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn-text:hover { background: rgba(255, 255, 255, .06); }
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(255, 255, 255, .14);
+  border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+.spinner[hidden] { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.noscript {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--text);
+  z-index: 20;
+}
+
+@media (max-width: 620px) {
+  .bar { gap: 8px; padding: 8px 10px; }
+  .tool { padding: 6px 8px; font-size: 11px; }
+  #btn-cad { display: none; }
+  .overlay-card { padding: 20px; }
+}

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Debian NAS · 状态</title>
+<link rel="stylesheet" href="./fonts.css" />
+<style>
+  :root { --p:#6252a1; --card:#fff; --surface:#fbf8ff; --on:#1d1a22; --sub:#494551; --line:#e6e1ea; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; padding:48px 20px;
+    font-family:"Inter","Debnas Sans SC","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    color:var(--on);
+    background: radial-gradient(55% 60% at 8% -10%, color-mix(in srgb, var(--p) 14%, transparent), transparent 70%), var(--surface);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -.01em; }
+  p.sub { margin: 0 0 28px; color: var(--sub); font-size: 13px; }
+  .card { background:var(--card); border-radius:22px; padding:20px 22px; box-shadow:0 10px 30px rgba(28,27,32,.08); margin-bottom:16px; }
+  h2 { font-size:14px; margin:0 0 12px; }
+  ul { margin:0; padding-left:18px; font-size:13px; line-height:1.9; color:var(--sub); }
+  .ok { color:#146c2e; }
+  .todo { color:#8a6a00; }
+  a.btn {
+    display:inline-block; margin-top:6px; padding:10px 20px; border-radius:999px;
+    background:var(--p); color:#fff; text-decoration:none; font-size:13px; font-weight:600;
+  }
+  code { font-family:ui-monospace,Menlo,monospace; background:#f3effa; padding:1px 6px; border-radius:6px; font-size:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Debian NAS WebUI</h1>
+  <p class="sub">控制台状态与入口。主界面在 <code>/</code>，登录后可用全部功能。</p>
+
+  <div class="card">
+    <h2>已就绪</h2>
+    <ul>
+      <li class="ok">PAM 认证（系统账号密码），会话 8 小时，CSRF 校验</li>
+      <li class="ok">首页 / 共享 / 文件 / 用户 / 存储 / 网络 / 服务 / 日志 / 终端 / 更新</li>
+      <li class="ok">虚拟机：libvirt 创建、启停、快照、磁盘扩容、光驱、网页 VNC 控制台</li>
+      <li class="ok">后端只监听 <code>127.0.0.1:8080</code>，由 Caddy 终止 TLS 并反代</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>入口</h2>
+    <ul>
+      <li>控制台：<code>https://&lt;主机&gt;/</code></li>
+      <li>虚拟机控制台：在「虚拟机」页点「控制台」，或 <code>/console.html?vm=&lt;名称&gt;</code></li>
+      <li>服务状态：<code>systemctl status debnas-web caddy libvirtd</code></li>
+    </ul>
+    <a class="btn" href="/">打开控制台</a>
+  </div>
+
+  <div class="card">
+    <h2>可选依赖</h2>
+    <ul>
+      <li><code>libvirt-daemon-system</code> + <code>virtinst</code>：虚拟机</li>
+      <li><code>samba-common-bin</code> / <code>smartmontools</code> / <code>podman</code>：对应页面</li>
+      <li>网页控制台的 noVNC 已内置，无需安装</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

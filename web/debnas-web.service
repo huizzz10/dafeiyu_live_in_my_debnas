@@ -1,0 +1,19 @@
+[Unit]
+Description=debnas 独立 WebUI 后端
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/debnas-web/server.py
+Environment=DEBNAS_WEB_PORT=8080
+Environment=DEBNAS_WEB_BIND=127.0.0.1
+Environment=DEBNAS_WEB_STATIC=/usr/local/lib/debnas-web/static
+Environment=DEBNAS_WEB_STATE=/var/lib/debnas-web
+# 运行用户由 deploy-web.sh 自动写入（SUDO_USER 或仓库属主）
+Environment=DEBNAS_WEB_RUN_AS=__DEBNAS_USER__
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

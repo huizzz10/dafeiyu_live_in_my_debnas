@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Debian NAS · 控制台</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◈</text></svg>" />
+  <link rel="stylesheet" href="./fonts.css" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <aside class="gutter-feed" id="gutter-feed" aria-label="QQ 动态"></aside>
+  <div class="gutter-right" id="gutter-right">
+    <aside class="gutter-hw" id="gutter-hw" aria-label="硬件状态"></aside>
+    <aside class="mh-dock" id="mihomo-dock" aria-label="mihomo 管理" hidden></aside>
+  </div>
+
+  <div id="app" class="app">
+    <div class="page-head">
+      <div class="page-head-row">
+        <button class="nav-toggle" id="nav-toggle" type="button" aria-label="打开菜单"
+                aria-expanded="false" aria-controls="nav">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="mobile-brand">
+          <span class="mobile-brand-mark"><img src="./icons/debian.svg" alt="Debian" /></span>
+          <span class="mobile-brand-text"><b>Debian NAS</b><small id="mobile-page-title">总览</small></span>
+        </div>
+        <div class="page-title-block">
+          <h1 id="page-title">总览</h1>
+          <p id="page-sub" class="muted"></p>
+        </div>
+        <div class="page-actions">
+          <button class="power-btn" id="reboot-btn" type="button" title="重启系统" aria-label="重启系统">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+                 stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3v9" />
+              <path d="M6.5 6.5a8 8 0 1 0 11 0" />
+            </svg>
+          </button>
+          <div class="user-wrap">
+            <button class="avatar" id="avatar" title="账户与外观" aria-label="账户与外观">?</button>
+            <div class="menu" id="user-menu" hidden>
+              <button class="menu-item menu-item-row" id="menu-theme">
+                <span>外观</span><span class="menu-hint" id="menu-theme-hint">跟随系统</span>
+              </button>
+              <button class="menu-item" id="menu-accent">外观与主题色</button>
+              <button class="menu-item" id="menu-passwd">修改密码</button>
+              <button class="menu-item" id="menu-about">关于</button>
+              <button class="menu-item menu-danger" id="menu-logout">注销</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+      <nav class="tabs" id="nav" role="tablist" aria-label="主导航">
+        <div class="drawer-head">
+          <span class="drawer-mark"><img src="./icons/debian.svg" alt="" /></span>
+          <span class="drawer-brand"><b>Debian NAS</b><small>NAS 控制台</small></span>
+          <button class="drawer-close" id="nav-close" type="button" aria-label="关闭菜单">×</button>
+        </div>
+        <div class="drawer-label">导航</div>
+        <button class="tab" data-view="home" role="tab">首页</button>
+        <button class="tab" data-view="shares" role="tab">共享</button>
+        <button class="tab" data-view="files" role="tab">文件</button>
+        <button class="tab" data-view="users" role="tab">用户</button>
+        <button class="tab" data-view="storage" role="tab">存储</button>
+        <button class="tab" data-view="network" role="tab">网络</button>
+        <div class="drawer-label">系统</div>
+        <button class="tab" data-view="vms" role="tab">虚拟机</button>
+        <button class="tab" data-view="services" role="tab">服务</button>
+        <button class="tab" data-view="logs" role="tab">日志</button>
+        <button class="tab" data-view="terminal" role="tab">终端</button>
+        <button class="tab" data-view="updates" role="tab">更新</button>
+        <div class="drawer-foot">Debian NAS · 局域网控制台</div>
+      </nav>
+    </div>
+
+    <main id="view" class="view" aria-live="polite"></main>
+  </div>
+
+  <div class="popover" id="accent-popover" hidden>
+    <div class="popover-title">外观</div>
+    <div class="theme-mode" id="theme-mode" role="group" aria-label="外观模式">
+      <button type="button" data-mode="auto">跟随系统</button>
+      <button type="button" data-mode="light">浅色</button>
+      <button type="button" data-mode="dark">深色</button>
+    </div>
+    <div class="theme-device" id="theme-device">设备深色模式：检测中…</div>
+    <div class="popover-sep"></div>
+    <div class="popover-title">主题色</div>
+    <div class="accent-current">
+      <span class="accent-dot" id="accent-dot"></span>
+      <span class="accent-hex" id="accent-hex">—</span>
+    </div>
+    <div class="swatches" id="swatches"></div>
+    <label class="custom-color">
+      <span>自定义</span>
+      <input type="color" id="accent-custom" value="#5b4bc4" />
+    </label>
+  </div>
+
+  <div class="toast-stack" id="toasts" role="status" aria-live="polite"></div>
+
+  <script src="./cockpit-shim.js"></script>
+  <script src="./theme.js"></script>
+  <script src="./api-web.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
