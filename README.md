@@ -1,4 +1,4 @@
-# my-debnas · Debian NAS 控制台
+# my-DebNAS · Debian NAS 控制台
 
 ![vibe coding](https://img.shields.io/badge/vibe_coding-AI_pair_programmed-ff69b4?style=flat-square)
 ![license](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)
@@ -31,7 +31,7 @@
 
 ## 和上游的关系
 
-起点是 [debnas](https://github.com/kekylin/debnas)：一个把 Debian 配成 HomeNAS 的脚本，
+起点是 [DebNAS](https://github.com/kekylin/debnas)：一个把 Debian 配成 HomeNAS 的脚本，
 WebUI 用 Cockpit + Portainer。本项目借用了它的 NAS 场景，但控制台是另写的，
 **不是 fork，也没有隶属关系**。
 
@@ -81,8 +81,8 @@ mihomo 没装或架构不匹配时，跑 `sudo ./install-mihomo.sh --check` 看�
 只支持 x86_64，其他架构会直接拒绝；Debian 12 未测试。
 
 ```bash
-git clone https://github.com/huizzz10/dafeiyu_live_in_my_debnas.git ~/my-debnas
-cd ~/my-debnas
+git clone https://github.com/huizzz10/dafeiyu_live_in_my_debnas.git ~/my-DebNAS
+cd ~/my-DebNAS
 sudo ./deploy-web.sh
 ```
 
@@ -192,7 +192,7 @@ sudo journalctl -u caddy -n 50 --no-pager
 
 ## 来源与许可
 
-- [debnas](https://github.com/kekylin/debnas)（GPL-3.0）：项目起点与场景参考，不是 fork
+- [DebNAS](https://github.com/kekylin/debnas)（GPL-3.0）：项目起点与场景参考，不是 fork
 - Cockpit / cockpit-file-sharing / cockpit-identities：早期界面参考，运行时不依赖
 - Debian swirl（Debian Open Use Logo License）、xterm.js（MIT）、
   noVNC（MPL-2.0 / BSD / CC-BY-SA）、Inter 与 Noto CJK（OFL）

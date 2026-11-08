@@ -88,7 +88,7 @@ case "$host_machine" in
     fi
     ;;
   *)
-    echo "my-debnas 只支持 x86_64；当前架构：$host_machine" >&2
+    echo "my-DebNAS 只支持 x86_64；当前架构：$host_machine" >&2
     exit 1
     ;;
 esac

@@ -2706,7 +2706,7 @@ def rpc_vm_snapshot_create(params):
         snap = "snap-" + time.strftime("%Y%m%d-%H%M%S")
     if vm_info(name) is None:
         raise ValueError("虚拟机不存在：%s" % name)
-    desc = str(params.get("description") or "debnas 控制台")[:200]
+    desc = str(params.get("description") or "DebNAS 控制台")[:200]
     _virsh_raise(("snapshot-create-as", name, snap, "--description", desc),
                  timeout=180, what="创建快照")
     return {"name": snap}

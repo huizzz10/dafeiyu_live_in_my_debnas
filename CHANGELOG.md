@@ -209,7 +209,7 @@
 
 ### 变更
 
-- 900px 以下改为 Argon 风格固定顶栏：主题色渐变、毛玻璃、汉堡按钮、`debnas` 品牌、
+- 900px 以下改为 Argon 风格固定顶栏：主题色渐变、毛玻璃、汉堡按钮、`DebNAS` 品牌、
   当前页面名、头像；桌面端布局不变
 - 顶部标签收进左侧抽屉：桌面式分组（导航 / 系统）、active 高亮、遮罩、关闭按钮，
   支持点遮罩 / Esc / 点导航项关闭，打开时锁定页面滚动
@@ -433,7 +433,7 @@
 ### 变更
 
 - 项目采用 **GPL-3.0**（新增 `LICENSE`），新增 `NOTICE`，明确来源：
-  `debnas`（GPL-3.0）、Cockpit / cockpit-file-sharing / cockpit-identities（GPL-3.0）、
+  `DebNAS`（GPL-3.0）、Cockpit / cockpit-file-sharing / cockpit-identities（GPL-3.0）、
   noVNC（MPL-2.0）、Inter（OFL-1.1）及 Debian 软件包
 - 移除 **HarmonyOS Sans** 字体子集（华为字体许可限制修改版/单独再分发），中文改用 OFL 的 Noto 子集
 - **SnowLuma** logo 改为本地可选：公开仓库不包含该文件（`.gitignore` 忽略），

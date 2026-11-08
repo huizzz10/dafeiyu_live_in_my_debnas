@@ -4403,7 +4403,7 @@
         '<span class="swatch-check">✓</span></button>';
     }).join("");
 
-    console.log("[debnas] accent swatches:", ACCENTS.length, ACCENTS.join(" "));
+    console.log("[DebNAS] accent swatches:", ACCENTS.length, ACCENTS.join(" "));
 
     function updateAccentUI() {
       var cur = (Theme.current().accent || "").toLowerCase();

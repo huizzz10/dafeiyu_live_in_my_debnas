@@ -3,7 +3,7 @@ Copyright 2010-2012 Google Corporation and other Noto CJK contributors
 Source: https://github.com/notofonts/noto-cjk
 License: SIL Open Font License 1.1
 
-This is a modified (subset + renamed) version used by the my-debnas UI.
+This is a modified (subset + renamed) version used by the my-DebNAS UI.
 The copyright notice and license are retained as required by the OFL.
 
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007

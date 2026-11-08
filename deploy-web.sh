@@ -30,7 +30,7 @@ for arg in "$@"; do
 done
 
 [[ $EUID -eq 0 ]] || { echo "请用 sudo 运行"; exit 1; }
-[[ "$(uname -m)" == "x86_64" ]] || { echo "my-debnas 只支持 x86_64，当前架构：$(uname -m)" >&2; exit 1; }
+[[ "$(uname -m)" == "x86_64" ]] || { echo "my-DebNAS 只支持 x86_64，当前架构：$(uname -m)" >&2; exit 1; }
 [[ -d "$HERE/web/frontend" ]] || { echo "缺少 web/frontend/"; exit 1; }
 
 if [[ $SKIP_DEPS -eq 0 ]]; then
@@ -100,7 +100,7 @@ DEPLOY_SH=$(mktemp /tmp/debnas-installer.XXXXXX)
 {
   cat <<'DEBNAS_HEADER'
 #!/bin/bash
-# debnas 一键部署：
+# DebNAS 一键部署：
 #   curl -fsSLk https://<主机>/deploy.sh | sudo bash
 set -euo pipefail
 [[ $EUID -eq 0 ]] || { echo "请用 sudo 运行" >&2; exit 1; }
