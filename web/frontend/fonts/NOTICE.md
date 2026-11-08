@@ -15,6 +15,3 @@
 
 界面里 Inter 负责西文，Debnas Sans SC 负责中文；子集之外的生僻字会回退到
 客户端系统字体（Noto Sans SC / PingFang SC / Microsoft YaHei 等）。
-
-之前使用过的 **HarmonyOS Sans SC** 已移除：华为的字体许可对修改版和单独再分发
-有限制，不适合直接放进公开仓库。确需使用请自行获取并遵守其许可。

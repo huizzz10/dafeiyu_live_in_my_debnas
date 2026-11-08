@@ -199,7 +199,7 @@ sudo journalctl -u caddy -n 50 --no-pager
 - Debian、libvirt、QEMU、Samba、Caddy、mihomo 等上游项目
 
 完整信息见 [`NOTICE`](NOTICE)。
-仓库不包含 SnowLuma 的代码和 logo，也不包含 HarmonyOS Sans 字体。
+仓库不包含 SnowLuma 的代码和 logo。
 
 ## 许可
 
