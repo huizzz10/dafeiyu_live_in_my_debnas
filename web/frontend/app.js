@@ -546,6 +546,13 @@
     return (n >= 1000 ? n.toFixed(0) : n.toFixed(2));
   }
 
+  function dsProbeLine(d) {
+    var p = d && d.provider;
+    if (!p) return "";
+    return '<div class="ds-probe"><span>' + esc(p.endpoint || "—") + "</span><span>" +
+      esc(p.key || "") + "</span></div>";
+  }
+
   function renderDeepseekDock(force) {
     var dock = $("#deepseek-dock");
     if (!dock) return;
@@ -565,8 +572,10 @@
       else { st = "无余额记录"; cls = "warn"; }
     }
 
-    var head = '<div class="mh-head"><span class="mh-brand"><span class="mh-mark ds-mark">D</span>' +
-      '<span class="mh-brand-text">DeepSeek</span></span>' +
+    var who = (d && d.provider && d.provider.name) || "API 余额";
+    var head = '<div class="mh-head"><span class="mh-brand"><span class="mh-mark ds-mark">' +
+      esc(who.charAt(0).toUpperCase()) + '</span>' +
+      '<span class="mh-brand-text">' + esc(who) + '</span></span>' +
       '<span class="mh-state ' + cls + '"><i></i>' + esc(st) + '</span>' +
       '<button class="mh-fold" id="ds-fold" type="button" title="' + (open ? "收起" : "展开") + '">' +
       (open ? "⌄" : "⌃") + "</button></div>";
@@ -576,7 +585,7 @@
     if (!d) {
       body = '<div class="mh-note">正在查询余额…</div>';
     } else if (!d.ok) {
-      body = '<div class="mh-note">' + esc(d.error || "查询失败") + "</div>" +
+      body = dsProbeLine(d) + '<div class="mh-note">' + esc(d.error || "查询失败") + "</div>" +
         '<div class="mh-actions"><button class="mh-btn" id="ds-refresh" type="button">重试</button></div>';
     } else if (!main) {
       body = '<div class="mh-note">接口没有返回余额。</div>' +
@@ -595,6 +604,7 @@
         '<span class="ds-num">' + esc(dsMoney(main.total)) + "</span>" +
         (d.available ? "" : '<span class="ds-tag">不可用</span>') + "</div>" +
         '<div class="ds-rows">' + rows + "</div>" +
+        dsProbeLine(d) +
         '<div class="mh-meta">' + esc(when) + " 更新 · 每 60 秒自动刷新</div>" +
         '<div class="mh-actions"><button class="mh-btn" id="ds-refresh" type="button">刷新</button></div>';
     }

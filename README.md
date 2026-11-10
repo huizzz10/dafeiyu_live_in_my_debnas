@@ -64,7 +64,7 @@ WebUI 用 Cockpit + Portainer。本项目借用了它的 NAS 场景，但控制�
   直接打开面板；只在登录后可见
 - **虚拟机**：创建、启停、快照、扩容、换盘、删除、浏览器 VNC
 - **其他**：应用自动发现（扫描容器端口和 AstrBot / NapCat 宿主进程）、QQ 动态、
-  mihomo 节点 / 模式 / 测速、DeepSeek 余额
+  mihomo 节点 / 模式 / 测速、API 余额（自动探测用哪家 key）
 
 界面默认跟随系统深浅色，手机端有卡片布局和抽屉导航，细节见[「界面」](#界面)。
 
@@ -87,7 +87,7 @@ QQ 动态和凭据页需要本机自己跑 AstrBot（6185）与 NapCat（6099）
   `cubic-bezier(.34, 1.56, .64, 1)`；系统开了「减少动态效果」就直接关掉动画
 - **离线资源**：Inter + Noto Sans SC 子集、图标、noVNC、xterm.js 都随仓库自带
 - **响应式**：宽屏（≥1400px）左右留白栏常驻（左 QQ 动态、右硬件卡 / mihomo /
-  DeepSeek 余额块）；
+  API 余额块）；
   1400–1599px 隐藏消息头像，把宽度让给正文；≤900px 改抽屉导航、凭据页变单列；
   ≤720px 的用户 / 服务 / 更新 / 共享 / 存储 / 网络页改卡片布局
 
@@ -272,9 +272,12 @@ sudo ./install-mihomo.sh       # 装到 /usr/local/bin/mihomo
 `amd64-compatible`，避免在只支持 SSE4.2 的机器上跑 AVX2 版本。
 它只装二进制，不生成配置；配置仍读 `/etc/mihomo/config.yaml`。
 
-### DeepSeek 余额（可选）
+### API 余额（可选）
 
-右侧栏 mihomo 下面有个余额块，由后端代查 DeepSeek 账户余额，需要自己的 API Key：
+右侧栏 mihomo 下面有个余额块，由后端代查 API 账户余额。它不绑死某一家：读环境变量
+和 `~/.config/*/{env,.env,env.sh}` 里所有以 `_API_KEY` 结尾的变量，按 DeepSeek →
+OpenAI → Anthropic → Moonshot → SiliconFlow → DashScope → 智谱 → Gemini → xAI
+的顺序挑一个显示；同名的 `<NAME>_BASE_URL` / `<NAME>_API_BASE` 可以指到自建代理。
 
 ```bash
 install -d -m 700 ~/.config/deepseek
@@ -282,9 +285,14 @@ printf 'DEEPSEEK_API_KEY=sk-你的密钥\n' > ~/.config/deepseek/env
 chmod 600 ~/.config/deepseek/env
 ```
 
+目前只有 DeepSeek 官方（或兼容它的代理）有 `/user/balance` 余额接口，探测到别家时
+块里会如实写「这个端点没有余额接口」，不会硬编成某个厂商。
+
 也可以写进 systemd drop-in 的 `Environment=`，但 `systemctl show` 对普通用户也能
-看到环境变量，**更推荐上面这个 0600 文件**。密钥只在服务端读，浏览器只能拿到
-余额 / 充值 / 赠送明细；没配或接口不通时块里直接显示原因，不影响其他功能。
+看到环境变量，**更推荐上面这个 0600 文件**。密钥只在服务端读，浏览器只拿到三样
+东西：厂商名、endpoint、密钥末 4 位；endpoint 是本机 / 内网地址时只显示「本机端点」
+「内网端点」，不会把内网拓扑带出去。没配或接口不通时块里直接显示原因，不影响其他
+功能。
 
 ## 配置参考
 
@@ -314,8 +322,9 @@ chmod 600 ~/.config/deepseek/env
 | `DEBNAS_MIHOMO_BIN` | `/usr/local/bin/mihomo` | mihomo 二进制路径 |
 | `DEBNAS_MIHOMO_API` | 读配置；兜底 `127.0.0.1:9093` | 外部控制器地址 |
 | `DEBNAS_MIHOMO_SECRET` | 读配置 | 控制器密钥 |
-| `DEBNAS_DEEPSEEK_TTL` | `60` | DeepSeek 余额缓存秒数 |
-| `DEEPSEEK_API_KEY` | 空 | DeepSeek 密钥，只服务端读（建议放 0600 文件） |
+| `DEBNAS_DEEPSEEK_TTL` | `60` | 余额缓存秒数（失败 15 秒后重试，手动刷新最少隔 5 秒） |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek 密钥；任何 `<NAME>_API_KEY` 都会被自动探测 |
+| `<NAME>_BASE_URL` | 空 | 该厂商的自建 / 代理 endpoint（也可写 `<NAME>_API_BASE`） |
 | `DEBNAS_VM_URI` | `qemu:///system` | libvirt 连接 URI |
 | `DEBNAS_VM_IMAGES` | `/var/lib/libvirt/images` | 虚拟机镜像目录 |
 | `DEBNAS_VM_ISO_DIRS` | 空 | 额外 ISO 目录，冒号分隔 |
@@ -360,7 +369,7 @@ drop-in 存在 `/etc/systemd/system/debnas-web.service.d/override.conf`，
 | `/etc/caddy/Caddyfile` | 反代配置（用了 `--with-caddy` 时） |
 | `~/.config/debnas-web/credentials.json` | AstrBot 面板凭据（0600） |
 | `~/.config/debnas-portal/prefs.json` | 各账号的主题偏好 |
-| `~/.config/deepseek/env` | DeepSeek API Key（0600，只给余额块用） |
+| `~/.config/<应用>/{env,.env,env.sh}` | API 密钥（0600；余额块会扫这里的 `*_API_KEY`） |
 
 真正需要备份的通常只有 `credentials.json`、你的 Caddy 配置，以及自己加的
 systemd drop-in；媒体缓存删了会重新生成。
@@ -416,9 +425,11 @@ my-DebNAS/
 - 「凭据」页只对已登录会话开放；AstrBot 密码从 0600 的
   `~/.config/debnas-web/credentials.json` 读，NapCat token 从 `webui.json` 读。
   页面会把明文交给任何登录账号，和上面「登录账号≈管理员」是同一个前提
-- DeepSeek 余额块同理：任何登录账号都能看到账户余额（不是密钥）。
-  `DEEPSEEK_API_KEY` 只在服务端读，不会下发浏览器；优先放 0600 的
-  `~/.config/deepseek/env`，别写进 unit 的 `Environment=`（`systemctl show` 可见）
+- API 余额块同理：任何登录账号都能看到余额，以及「用的是哪家 key、末 4 位、
+  endpoint」。密钥明文只在服务端用，不下发浏览器；探测范围是本机环境变量和
+  `~/.config/*/{env,.env,env.sh}`，里面的 `*_API_KEY` 会读进内存但不会回传；
+  endpoint 是内网地址时只显示「内网端点」。优先放 0600 文件，别写进 unit 的
+  `Environment=`（`systemctl show` 可见）
 - 仓库里不带真实身份：QQ 号、人设名、局域网地址都是环境变量或示例值，默认值只有
   中性占位
 
@@ -461,7 +472,8 @@ account  required  pam_succeed_if.so user ingroup sudo
 - 磁盘扩容只扩虚拟盘，guest 内还要自己扩分区
 - 容器操作依赖运行账号的 rootless podman
 - 界面是 M3E 风格的 CSS 实现，不是 Google 官方组件库，组件细节不保证与规范逐条对齐
-- DeepSeek 余额块要自备 API Key，只查余额 / 充值 / 赠送，不做充值和用量明细
+- API 余额块只查 DeepSeek 系（含兼容它的代理）的 `/user/balance`，别家只说明
+  「没有余额接口」；不做充值和用量明细
 - 不包含 RAID 编排、相册、影音套件、Portainer 替代
 
 ## 开发与排错

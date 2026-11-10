@@ -43,6 +43,7 @@ import termios
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
@@ -1410,41 +1411,171 @@ DS_BALANCE = {"at": 0.0, "data": None}
 DS_BALANCE_TTL = float(os.environ.get("DEBNAS_DEEPSEEK_TTL", "60"))
 # 即使点「刷新」也至少隔 5 秒，避免把第三方额度和接口 QPS 浪费在连点上
 DS_FORCE_MIN = 5.0
-DS_API = "https://api.deepseek.com/user/balance"
 
 
-def _deepseek_key():
-    """密钥只从环境变量或 ~/.config/deepseek/env 读，绝不发给前端。"""
-    key = str(os.environ.get("DEEPSEEK_API_KEY") or "").strip()
-    if key:
-        return key
-    path = os.path.join(_qq_home(), ".config", "deepseek", "env")
+_API_PROVIDERS = {
+    "DEEPSEEK": "DeepSeek",
+    "OPENAI": "OpenAI",
+    "ANTHROPIC": "Anthropic",
+    "MOONSHOT": "Moonshot",
+    "SILICONFLOW": "SiliconFlow",
+    "DASHSCOPE": "DashScope",
+    "ZHIPU": "智谱",
+    "GEMINI": "Gemini",
+    "XAI": "xAI",
+}
+# 同时找到多个时，按这个顺序挑一个来显示
+_API_PRIORITY = ["DEEPSEEK", "OPENAI", "ANTHROPIC", "MOONSHOT", "SILICONFLOW",
+                 "DASHSCOPE", "ZHIPU", "GEMINI", "XAI"]
+
+
+def _read_env_file(path):
+    out = {}
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 line = line.strip()
-                if line.startswith("DEEPSEEK_API_KEY="):
-                    return line.split("=", 1)[1].strip().strip("'\"")
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip("'\"")
     except OSError:
         pass
-    return ""
+    return out
+
+
+def _api_env_files():
+    """扫 ~/.config/*/{env,.env,env.sh}，里面通常就是各家 API 密钥。"""
+    base = os.path.join(_qq_home(), ".config")
+    files = []
+    try:
+        for name in sorted(os.listdir(base)):
+            for fname in ("env", ".env", "env.sh"):
+                path = os.path.join(base, name, fname)
+                if os.path.isfile(path):
+                    files.append(path)
+    except OSError:
+        pass
+    return files
+
+
+def _api_candidates():
+    """自动探测本机配了哪家 API：密钥 + base url + 出处。
+
+    只看「名字以 _API_KEY 结尾」的变量，密钥本身不回传前端，只给末 4 位。
+    """
+    found = {}
+    order = []
+
+    def add(prefix, key, source, base):
+        prefix = str(prefix).upper()
+        if not key or prefix in found:
+            return
+        found[prefix] = {
+            "prefix": prefix,
+            "name": _API_PROVIDERS.get(prefix, prefix.title()),
+            "key": key,
+            "base": str(base or "").strip(),
+            "source": source,
+        }
+        order.append(prefix)
+
+    for k, v in os.environ.items():
+        if k.endswith("_API_KEY"):
+            add(k[:-8], v, "环境变量 " + k,
+                os.environ.get(k[:-8] + "_BASE_URL") or os.environ.get(k[:-8] + "_API_BASE"))
+    for path in _api_env_files():
+        vals = _read_env_file(path)
+        for k, v in vals.items():
+            if k.endswith("_API_KEY"):
+                add(k[:-8], v, path.replace(_qq_home(), "~"),
+                    vals.get(k[:-8] + "_BASE_URL") or vals.get(k[:-8] + "_API_BASE"))
+    if not order:
+        return []
+    order.sort(key=lambda p: _API_PRIORITY.index(p) if p in _API_PRIORITY else 99)
+    return [found[p] for p in order]
+
+
+def _api_endpoint(cand):
+    if cand["base"]:
+        base = cand["base"].rstrip("/")
+        if not base.startswith(("http://", "https://")):
+            base = "https://" + base
+    elif cand["prefix"] == "DEEPSEEK":
+        base = "https://api.deepseek.com"
+    else:
+        base = ""
+    return base
+
+
+def _public_endpoint(host):
+    """给前端看的 endpoint：本机 / 内网地址只给中性标签，别把网络拓扑带出去。"""
+    host = str(host or "").strip()
+    if not host:
+        return ""
+    bare = (host.split("]")[0].strip("[") if host.startswith("[")
+            else host.rsplit(":", 1)[0]).lower()
+    if not bare or bare in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return "本机端点"
+    try:
+        ip = ipaddress.ip_address(bare)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
+            return "内网端点"
+        return host
+    except ValueError:
+        pass
+    if bare.endswith((".local", ".lan", ".internal", ".localdomain", ".home.arpa")):
+        return "内网端点"
+    return host
+
+
+def _api_summary(cand):
+    """给前端看的探测结果：哪家、哪个 endpoint、密钥末 4 位。
+
+    密钥明文和它所在的文件路径都不下发；endpoint 走 _public_endpoint 脱敏。
+    """
+    if not cand:
+        return None
+    base = _api_endpoint(cand)
+    host = ""
+    if base:
+        try:
+            host = urllib.parse.urlparse(base).netloc
+        except ValueError:
+            host = base
+    key = cand["key"]
+    return {
+        "name": cand["name"],
+        "endpoint": _public_endpoint(host) or (
+            "api.deepseek.com" if cand["prefix"] == "DEEPSEEK" else "官方默认"),
+        "key": ("…" + key[-4:]) if len(key) >= 12 else "…",
+    }
 
 
 def rpc_deepseek(params):
-    """查 DeepSeek 账户余额（服务端代取，前端只拿余额）。"""
+    """查余额：自动探测用的是哪家 API，只有 DeepSeek 官方（或兼容它的代理）有余额接口。"""
     now = time.time()
     cached = DS_BALANCE["data"]
     ttl = DS_BALANCE_TTL if cached and cached.get("ok") else min(DS_BALANCE_TTL, 15.0)
     force = bool(params.get("force")) if isinstance(params, dict) else False
-    if cached is not None and now - DS_BALANCE["at"] < (DS_FORCE_MIN if force else ttl):
+    floor = DS_FORCE_MIN if force else ttl
+    if cached is not None and now - DS_BALANCE["at"] < floor:
         return cached
-    key = _deepseek_key()
-    if not key:
-        data = {"ok": False, "error": "没找到 DEEPSEEK_API_KEY（环境变量或 ~/.config/deepseek/env）"}
+
+    cand = (_api_candidates() or [None])[0]
+    provider = _api_summary(cand)
+    if not cand:
+        data = {"ok": False, "provider": None,
+                "error": "没找到 API 密钥（环境变量或 ~/.config/*/env 里的 *_API_KEY）"}
+    elif "deepseek" not in _api_endpoint(cand):
+        data = {"ok": False, "provider": provider,
+                "error": "探测到 " + provider["name"] + " @ " + provider["endpoint"] +
+                         "，这个端点没有 /user/balance 余额接口"}
     else:
+        url = _api_endpoint(cand) + "/user/balance"
         try:
-            req = urllib.request.Request(DS_API, headers={
-                "Authorization": "Bearer " + key,
+            req = urllib.request.Request(url, headers={
+                "Authorization": "Bearer " + cand["key"],
                 "Accept": "application/json",
                 "User-Agent": "debnas-web",
             })
@@ -1465,11 +1596,12 @@ def rpc_deepseek(params):
                 "available": bool(payload.get("is_available")),
                 "items": items,
                 "at": int(now),
+                "provider": provider,
             }
         except urllib.error.HTTPError as exc:
-            data = {"ok": False, "error": "接口返回 %d" % exc.code}
+            data = {"ok": False, "provider": provider, "error": "接口返回 %d" % exc.code}
         except Exception:  # noqa: BLE001
-            data = {"ok": False, "error": "请求 api.deepseek.com 失败"}
+            data = {"ok": False, "provider": provider, "error": "请求 " + (provider or {}).get("endpoint", "接口") + " 失败"}
     DS_BALANCE.update(at=now, data=data)
     return data
 
@@ -3394,7 +3526,7 @@ def rpc_vm_snapshot_create(params):
         snap = "snap-" + time.strftime("%Y%m%d-%H%M%S")
     if vm_info(name) is None:
         raise ValueError("虚拟机不存在：%s" % name)
-    desc = str(params.get("description") or "DebNAS 控制台")[:200]
+    desc = str(params.get("description") or "debnas 控制台")[:200]
     _virsh_raise(("snapshot-create-as", name, snap, "--description", desc),
                  timeout=180, what="创建快照")
     return {"name": snap}

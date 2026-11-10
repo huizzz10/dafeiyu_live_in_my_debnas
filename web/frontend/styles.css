@@ -1558,12 +1558,22 @@ html.dark .hero-status { background: rgba(255, 255, 255, .1); }
 .mh-state.off { color: var(--on-surface-variant); }
 .mh-state.err { color: var(--error); }
 .mh-state.wait { color: var(--p); }
-/* DeepSeek 余额块：沿用 mihomo 的卡片材质，只加余额排版 */
+/* API 余额块：沿用 mihomo 的卡片材质，只加余额排版 */
 .ds-dock .mh-brand-text { text-transform: none; }
 .ds-mark {
   background: linear-gradient(135deg, #4d6bfe, #2f3fd8);
   color: #fff;
   font-family: ui-monospace, Menlo, monospace;
+}
+.ds-probe {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px;
+  color: var(--on-surface-variant);
+  opacity: 0.85;
+  word-break: break-all;
 }
 .ds-balance {
   display: flex;
