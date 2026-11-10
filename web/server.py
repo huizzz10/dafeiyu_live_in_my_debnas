@@ -33,6 +33,7 @@ import shlex
 import shutil
 import signal
 import socket
+import sqlite3
 import string
 import struct
 import subprocess
@@ -46,6 +47,7 @@ import urllib.request
 import zipfile
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -457,6 +459,16 @@ def rpc_apps(_):
                 continue
             seen.add(port)
             entries.append({"name": name, "port": port, "code": "000", "title": ""})
+    # 迁移后的机器人宿主进程：AstrBot 控制台 / NapCat 面板
+    for name, port in (("astrbot", 6185), ("napcat", 6099)):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.4):
+                pass
+        except OSError:
+            continue
+        if any(e["port"] == port for e in entries):
+            continue
+        entries.append({"name": name, "port": port, "code": "000", "title": ""})
     if not entries:
         return []
 
@@ -468,22 +480,266 @@ def rpc_apps(_):
     return entries
 
 
+def _portal_home():
+    user = os.environ.get("DEBNAS_WEB_RUN_AS")
+    try:
+        return pwd.getpwnam(user).pw_dir if user else os.path.expanduser("~")
+    except KeyError:
+        return os.path.expanduser("~")
+
+
+def rpc_credentials(_):
+    """登录后才可见的面板入口与凭据（密码只从 0600 的本地文件读）。"""
+    home = _portal_home()
+    def port_up(port):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.4):
+                return True
+        except OSError:
+            return False
+
+    out = {
+        "astrbot": {"username": "astrbot", "password": "", "port": 6185,
+                    "online": port_up(6185)},
+        "napcat": {"token": "", "port": 6099, "online": port_up(6099)},
+    }
+    path = os.environ.get("DEBNAS_CREDENTIALS_FILE") or os.path.join(
+        home, ".config", "debnas-web", "credentials.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        ab = data.get("astrbot") or {}
+        for key in ("username", "password"):
+            if ab.get(key):
+                out["astrbot"][key] = str(ab[key])
+    except Exception:
+        pass
+    napcat = os.environ.get("DEBNAS_NAPCAT_WEBUI") or os.path.join(
+        home, "Napcat", "opt", "QQ", "resources", "app", "app_launcher",
+        "napcat", "config", "webui.json")
+    try:
+        with open(napcat, encoding="utf-8") as f:
+            out["napcat"]["token"] = str(json.load(f).get("token") or "")
+    except Exception:
+        pass
+    return out
+
+
 QQ_FEED_CACHE = {"at": 0, "data": []}
 QQ_FEED_TTL = float(os.environ.get("DEBNAS_QQ_FEED_TTL", "8"))
 
 
-def rpc_qq(_):
-    # 不指定容器名：qqfeed.sh 自己找 SnowLuma（名字/镜像），读不到日志时退回 journald
+def _astrbot_history_path():
+    path = os.environ.get("DEBNAS_QQ_HISTORY", "")
+    if path:
+        return path
+    user = os.environ.get("DEBNAS_WEB_RUN_AS")
+    try:
+        home = pwd.getpwnam(user).pw_dir if user else os.path.expanduser("~")
+    except KeyError:
+        home = os.path.expanduser("~")
+    return os.path.join(home, "astrbot-src", "data", "plugin_data",
+                        "astrbot_plugin_feiyu", "history.jsonl")
+
+
+def _astrbot_db_path():
+    user = os.environ.get("DEBNAS_WEB_RUN_AS")
+    try:
+        home = pwd.getpwnam(user).pw_dir if user else os.path.expanduser("~")
+    except KeyError:
+        home = os.path.expanduser("~")
+    return os.environ.get("DEBNAS_ASTRBOT_DB",
+                          os.path.join(home, "astrbot-src", "data", "data_v4.db"))
+
+
+def _clean_feed_text(text):
+    """去掉提醒/引用/附件路径这些内部标记，只留下能看的聊天文本。"""
+    text = str(text or "")
+    text = re.sub(r"<Quoted Message>.*?</Quoted Message>", "", text, flags=re.S)
+    text = re.sub(r"<system_reminder>.*?</system_reminder>", "", text, flags=re.S)
+    m = re.search(r"\[File Attachment: name ([^,\]]+)", text)
+    if m:
+        text = "[文件] " + m.group(1).strip()
+    text = text.strip()
+    if text.startswith("【机器人的") or text.startswith("【系统"):
+        return ""
+    return text
+
+
+def _astrbot_feed():
+    """读机器人插件新写入的实时记录（只认 src=astrbot，旧 SnowLuma 导入不显示）。"""
+    try:
+        with open(_astrbot_history_path(), encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()[-1200:]
+    except OSError:
+        return []
     now = time.time()
-    if QQ_FEED_CACHE["at"] and now - QQ_FEED_CACHE["at"] < QQ_FEED_TTL:
-        return QQ_FEED_CACHE["data"]
+    bot_uin = os.environ.get("DEBNAS_QQ_BOT_UIN", "")
+    items = []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+            t = float(rec.get("t") or 0) / 1000.0
+        except Exception:
+            continue
+        if not t or now - t > 24 * 3600:
+            continue
+        if rec.get("src") != "astrbot":
+            continue
+        text = str(rec.get("text") or "").strip()
+        if not text:
+            continue
+        chat = str(rec.get("chat") or "")
+        kind, _, peer = chat.partition(":")
+        out = rec.get("role") == "me"
+        owner = os.environ.get("DEBNAS_QQ_OWNER", "")
+        who = "机器人" if out else (
+            "我" if kind == "private" and peer == owner else
+            (str(rec.get("name") or peer or "QQ")))
+        items.append({
+            "time": time.strftime("%H:%M:%S", time.localtime(t)),
+            "ts": int(t),
+            "date": time.strftime("%Y-%m-%d", time.localtime(t)),
+            "dir": "out" if out else "in",
+            "scope": "群聊" if kind == "group" else "私聊",
+            "who": who,
+            "uin": bot_uin if out else (peer if kind == "private" else ""),
+            "mid": "",
+            "chat": chat,
+            "text": text[:240],
+            "media": [],
+        })
+    return items[-80:]
+
+
+def _astrbot_db_feed():
+    """从 AstrBot 的 conversations 表还原真实对话（含今天的会话）。"""
+    path = _astrbot_db_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        conn = sqlite3.connect("file:" + path + "?mode=ro", uri=True, timeout=2)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "select user_id, content, updated_at from conversations "
+            "where platform_id = 'napcat' order by updated_at desc limit 30"
+        ).fetchall()
+        conn.close()
+    except sqlite3.Error:
+        return []
+    now = time.time()
+    bot_uin = os.environ.get("DEBNAS_QQ_BOT_UIN", "")
+    items = []
+    for row in rows:
+        umo = str(row["user_id"] or "")
+        parts = umo.split(":")
+        kind = parts[1] if len(parts) > 1 else ""
+        peer = parts[2] if len(parts) > 2 else ""
+        is_group = "Group" in kind
+        chat = ("group:" if is_group else "private:") + peer
+        try:
+            content = json.loads(row["content"] or "[]")
+        except Exception:
+            continue
+        if not isinstance(content, list):
+            continue
+        try:
+            updated = datetime.strptime(
+                str(row["updated_at"])[:19], "%Y-%m-%d %H:%M:%S"
+            ).replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            updated = now
+        last_ts = 0.0
+        for msg in content:
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get("role") or "")
+            if role not in ("user", "assistant"):
+                continue
+            texts, reminder = [], None
+            for part in msg.get("content") or []:
+                if not isinstance(part, dict) or part.get("type") != "text":
+                    continue
+                txt = str(part.get("text") or "")
+                m = re.search(r"Current datetime:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})", txt)
+                if m:
+                    try:
+                        reminder = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").timestamp()
+                    except Exception:
+                        pass
+                    continue
+                if txt.strip():
+                    texts.append(txt.strip())
+            text = "\n".join(texts).strip()
+            if not text:
+                continue
+            if role == "user":
+                ts = reminder or updated
+                if ts <= last_ts:
+                    ts = last_ts + 1
+            else:
+                ts = (last_ts + 1) if last_ts else (updated + 1)
+            last_ts = ts
+            if now - ts > 24 * 3600:
+                continue
+            out = role == "assistant"
+            owner = os.environ.get("DEBNAS_QQ_OWNER", "")
+            who = ("机器人" if out else
+                   ("我" if (not is_group and peer == owner) else
+                    ("群聊" if is_group else "私聊")))
+            items.append({
+                "time": time.strftime("%H:%M:%S", time.localtime(ts)),
+                "ts": int(ts),
+                "date": time.strftime("%Y-%m-%d", time.localtime(ts)),
+                "dir": "out" if out else "in",
+                "scope": "群聊" if is_group else "私聊",
+                "who": who,
+                "uin": bot_uin if out else (peer if not is_group else ""),
+                "mid": "",
+                "chat": chat,
+                "text": text[:240],
+                "media": [],
+            })
+    items.sort(key=lambda x: x["ts"])
+    return items[-80:]
+
+
+def _astrbot_live_feed():
+    """插件实时日志 + 会话库合并去重；没有新数据就返回空，不再回退旧 SnowLuma 源。"""
+    hist = _astrbot_feed()
+    db = _astrbot_db_feed()
+    if not hist and not db:
+        return []
+    seen, out = set(), []
+    for it in sorted(hist + db, key=lambda x: x["ts"]):
+        text = _clean_feed_text(it.get("text", ""))
+        if not text:
+            continue
+        it["text"] = text[:240]
+        key = (it.get("chat", ""), it.get("dir"), text[:80],
+               int(it.get("ts", 0)) // 120)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return out[-80:]
+
+
+def _qqfeed_legacy():
     p = "/usr/local/lib/debnas-portal/qqfeed.sh"
     r = run(["/bin/bash", p], timeout=20,
             as_user=os.environ.get("DEBNAS_WEB_RUN_AS") or None)
     try:
-        data = json.loads(r.get("out") or "[]")
+        return json.loads(r.get("out") or "[]")
     except Exception:
-        data = []
+        return []
+
+
+def rpc_qq(_):
+    now = time.time()
+    if QQ_FEED_CACHE["at"] and now - QQ_FEED_CACHE["at"] < QQ_FEED_TTL:
+        return QQ_FEED_CACHE["data"]
+    data = _astrbot_live_feed()
     QQ_FEED_CACHE.update(at=now, data=data)
     return data
 
@@ -3184,6 +3440,7 @@ RPC = {
     "users": rpc_users,
     "storage": rpc_storage,
     "apps": rpc_apps,
+    "credentials": rpc_credentials,
     "qq": rpc_qq,
     "mihomo": rpc_mihomo,
     "mihomo_action": rpc_mihomo_action,

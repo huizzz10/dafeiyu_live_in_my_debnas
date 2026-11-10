@@ -1,5 +1,29 @@
 # 变更记录
 
+## 2026-11-10（QQ 迁移到 AstrBot / NapCat，新增登录凭据）
+
+### 新增
+
+- 「登录凭据」页：AstrBot 控制台地址 / 账号 / 密码、NapCat WebUI 地址 / token，
+  带在线状态、显示 / 复制按钮和直达链接；只在登录后可见
+- `credentials` RPC：AstrBot 凭据读运行账号主目录的
+  `~/.config/debnas-web/credentials.json`（0600），NapCat token 读
+  `Napcat/opt/QQ/resources/app/app_launcher/napcat/config/webui.json`；
+  两条路径可分别用 `DEBNAS_CREDENTIALS_FILE` / `DEBNAS_NAPCAT_WEBUI` 覆盖
+- 首页应用入口识别 AstrBot（6185）和 NapCat（6099）宿主进程，不再只靠容器发布端口
+- 左侧 QQ 动态改为聊天流：按天分隔、间隔超过 10 分钟补时间、180 秒内同一人的消息
+  合并头像，标题吸顶并保持滚动位置
+
+### 变更
+
+- QQ 动态数据源从 SnowLuma 容器日志切到 AstrBot：合并插件的
+  `astrbot_plugin_feiyu/history.jsonl` 和 AstrBot 会话库 `data_v4.db`，取最近
+  24 小时内的记录（插件历史只认 `src=astrbot`），去重后最多显示 80 条；
+  旧 SnowLuma 导入不显示
+- 清掉消息里的内部标记（引用、system reminder、附件路径），附件只保留文件名
+- 清掉 SnowLuma 专用的 `containerPull` 接口和无入口的事件分支；按镜像拉取不受影响
+- README 补充凭据页、AstrBot / NapCat 数据源、新的响应式布局和排错项
+
 ## 2026-11-08（仓库清理）
 
 ### 移除

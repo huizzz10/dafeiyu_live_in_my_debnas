@@ -8,7 +8,7 @@
 
 一台 Debian 13 小主机的自建 NAS 控制台：PAM 登录、Samba 共享、文件、用户与组、
 存储 / 网络 / 服务 / 日志、真实终端、apt 更新、libvirt 虚拟机 + 浏览器 VNC，
-外加容器应用、QQ 动态和 mihomo 管理块。
+外加 AstrBot / NapCat 的 QQ 动态与面板凭据、容器应用入口和 mihomo 管理块。
 
 界面按 **Material 3 Expressive（MD3E）** 设计，纯手写 CSS + 原生 JS。
 没有 Cockpit，没有 Node 构建，后端只用 Python 标准库。
@@ -27,7 +27,8 @@
 
 - 适合：自己的小主机、局域网、一个可信管理员、Debian 13 x86_64
 - 不适合：公网、多租户、关键业务、需要开箱即用的相册 / 影音 / RAID 套件
-- 容器管理只做应用入口、拉镜像和 noVNC 口令，不是 Portainer 替代品
+- 应用入口自动发现容器端口和 AstrBot / NapCat 宿主进程，管理只做入口、拉镜像和
+  noVNC 口令，不是 Portainer 替代品
 
 ## 和上游的关系
 
@@ -50,10 +51,18 @@ WebUI 用 Cockpit + Portainer。本项目借用了它的 NAS 场景，但控制�
 - **服务 / 日志**：systemd 启停、journalctl 搜索
 - **终端**：真实 PTY，支持 vim / top / htop / tmux
 - **更新**：`full-upgrade`、无人值守升级、apt 历史
+- **凭据**：AstrBot 控制台账号 / 密码、NapCat WebUI token，在线状态、复制 / 显示、
+  直接打开面板；只在登录后可见
 - **虚拟机**：创建、启停、快照、扩容、换盘、删除、浏览器 VNC
-- **其他**：容器应用自动发现、QQ 动态、mihomo 节点 / 模式 / 测速
+- **其他**：应用自动发现（含 AstrBot / NapCat）、QQ 动态（插件实时记录 + 会话库）、
+  mihomo 节点 / 模式 / 测速
 
 界面默认跟随系统深浅色，手机端有卡片布局和抽屉导航，细节见[「界面」](#界面)。
+
+QQ 动态和凭据页需要本机自己跑 AstrBot（6185）与 NapCat（6099），仓库不负责安装
+这两个服务。AstrBot 密码放在运行账号的 `~/.config/debnas-web/credentials.json`，
+NapCat token 从它的 `webui.json` 读，配置方法见[「快速开始」](#快速开始)。
+
 mihomo 没装或架构不匹配时，跑 `sudo ./install-mihomo.sh --check` 看推荐资产，
 再跑 `sudo ./install-mihomo.sh` 安装。
 
@@ -66,11 +75,14 @@ mihomo 没装或架构不匹配时，跑 `sudo ./install-mihomo.sh --check` 看�
   tone / chroma 推导 primary、tertiary 等角色色；选择按账号存
   `~/.config/debnas-portal/prefs.json`，换浏览器也生效
 - **深浅色**：默认跟随系统（登录页也跟随），也可以手动固定浅色 / 深色
+- **QQ 聊天流**：左侧留白栏按天分隔，间隔超过 10 分钟补时间，180 秒内同一人的消息
+  合并头像；标题吸顶，往上翻看旧消息时不会被新消息拉回底部
 - **形状与动效**：圆角 10 / 16 / 24 / 28 / 全圆，弹性缓动
   `cubic-bezier(.34, 1.56, .64, 1)`；系统开了「减少动态效果」就直接关掉动画
 - **离线资源**：Inter + Noto Sans SC 子集、图标、noVNC、xterm.js 都随仓库自带
 - **响应式**：宽屏（≥1400px）左右留白栏常驻（左 QQ 动态、右硬件卡和 mihomo 块）；
-  ≤900px 改抽屉导航；≤720px 的用户 / 服务 / 更新 / 共享 / 存储 / 网络页改卡片布局
+  1400–1599px 隐藏消息头像，把宽度让给正文；≤900px 改抽屉导航、凭据页变单列；
+  ≤720px 的用户 / 服务 / 更新 / 共享 / 存储 / 网络页改卡片布局
 
 改颜色基本只用改 `web/frontend/theme.js` 的 `DEFAULTS` 和 `palette()`，
 组件样式不用跟着动。
@@ -120,6 +132,21 @@ sudo ./deploy-web.sh --reinstall-deps # 强制重装依赖
 
 `--with-caddy` 会覆盖 `/etc/caddy/Caddyfile`；已有站点请手动合并 `web/Caddyfile.snippet`。
 
+「凭据」页的 AstrBot 账号密码放在**运行账号**（部署时的 sudo 用户）主目录下，
+建议目录 0700、文件 0600：
+
+```bash
+install -d -m 700 ~/.config/debnas-web
+printf '{"astrbot": {"username": "astrbot", "password": "面板密码"}}\n' \
+  > ~/.config/debnas-web/credentials.json
+chmod 600 ~/.config/debnas-web/credentials.json
+```
+
+NapCat 的 token 直接读
+`~/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/webui.json`，装好 NapCat
+就有，不用另配。两条路径可分别用 `DEBNAS_CREDENTIALS_FILE`、`DEBNAS_NAPCAT_WEBUI`
+覆盖。
+
 ## 安全
 
 **登录账号约等于这台 NAS 的管理员。** 控制台没有按用户分级：
@@ -139,6 +166,9 @@ sudo ./deploy-web.sh --reinstall-deps # 强制重装依赖
   **生产环境绝对不能设**
 - `/deploy.sh` 是公开安装器，不走登录；不想局域网可下载就删掉 `static/deploy.sh`
 - 新建的虚拟机 VNC 只监听 `127.0.0.1`；QQ 图片 / 表情代理限制域名和 8 MB
+- 「凭据」页只对已登录会话开放；AstrBot 密码从 0600 的
+  `~/.config/debnas-web/credentials.json` 读，NapCat token 从 `webui.json` 读。
+  页面会把明文交给任何登录账号，和上面「登录账号≈管理员」是同一个前提
 
 如果机器上还有普通 SSH 用户，建议在 `/etc/pam.d/debnas-web` 限制只允许 sudo 组登录：
 
@@ -155,6 +185,10 @@ account  required  pam_succeed_if.so user ingroup sudo
 - 文件页不是用户级沙箱；跨用户目录可能产生 root 属主文件
 - 上传单文件上限 16 GB；超大文件或断点续传建议走 SMB
 - 容器操作依赖运行账号的 rootless podman
+- QQ 动态只读 AstrBot 的插件历史（`astrbot_plugin_feiyu/history.jsonl`）和会话库
+  （`data_v4.db`），默认最近 24 小时、最多 80 条；SnowLuma 时代导入的旧记录不显示
+- AstrBot / NapCat 要自己安装并监听 6185 / 6099；凭据页只做展示，AstrBot 面板改密后
+  要手动同步 `credentials.json`
 - 虚拟机控制台只支持 VNC；向导没有 UEFI / TPM，Windows 11 要手动改 XML
 - 磁盘扩容只扩虚拟盘，guest 内还要自己扩分区
 - 网络修改依赖 NetworkManager（`nmcli`）
@@ -182,6 +216,8 @@ bash -n deploy-web.sh install-deps.sh install-mihomo.sh
 | 终端空白 | `/xterm/xterm.js` 是否 200，浏览器控制台报错 |
 | 虚拟机未就绪 | `systemctl status libvirtd` |
 | mihomo API 不可达 | `/etc/mihomo/config.yaml` 的 `external-controller` / `secret` |
+| 凭据页显示「（未配置）」 | `~/.config/debnas-web/credentials.json` 是否存在、0600 |
+| 左侧 QQ 动态空白 | AstrBot 是否在跑，`history.jsonl` / `data_v4.db` 是否有新记录 |
 
 日志：
 
@@ -193,13 +229,14 @@ sudo journalctl -u caddy -n 50 --no-pager
 ## 来源与许可
 
 - [DebNAS](https://github.com/kekylin/debnas)（GPL-3.0）：项目起点与场景参考，不是 fork
+- AstrBot、NapCat：外部部署的 QQ 机器人 / 协议端，仓库只展示状态与凭据，不分发它们
 - Cockpit / cockpit-file-sharing / cockpit-identities：早期界面参考，运行时不依赖
 - Debian swirl（Debian Open Use Logo License）、xterm.js（MIT）、
   noVNC（MPL-2.0 / BSD / CC-BY-SA）、Inter 与 Noto CJK（OFL）
 - Debian、libvirt、QEMU、Samba、Caddy、mihomo 等上游项目
 
 完整信息见 [`NOTICE`](NOTICE)。
-仓库不包含 SnowLuma 的代码和 logo。
+仓库不包含 SnowLuma 的代码和 logo；AstrBot / NapCat 也只按外部服务接入。
 
 ## 许可
 

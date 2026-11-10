@@ -93,6 +93,7 @@
     },
     appServices: function () { return rpc("apps").then(function (l) { return l; }); },
     qqFeed: function () { return rpc("qq"); },
+    credentials: function () { return rpc("credentials"); },
     mihomo: function () { return rpc("mihomo"); },
     mihomoAction: function (p) { return rpc("mihomo_action", p || {}); },
     mihomoImport: function (data) { return rpc("mihomo_import", { data: data }); },
@@ -237,16 +238,6 @@
     },
     uploadFinish: function (id) { return rpc("upload_finish", { id: id }); },
     uploadAbort: function (id) { return rpc("upload_abort", { id: id }); },
-    containerPull: function () {
-      return rpc("containers").then(function (list) {
-        var hit = (list || []).filter(function (c) {
-          return /snowluma/i.test(String(c.name || "") + " " + String(c.image || ""));
-        })[0];
-        if (!hit) throw new Error("没有找到 SnowLuma 容器");
-        return rpc("container_pull");
-      });
-    },
-
     /* 重新部署（后台排队，服务会短暂重启） */
     redeployPortal: function (source) { return rpc("portal_redeploy", { source: source || "" }); },
 

@@ -19,6 +19,7 @@
     network: { title: "网络", sub: "接口与地址" },
     services: { title: "服务", sub: "运行中的 systemd 服务" },
     updates: { title: "更新", sub: "系统补丁、组件与历史记录" },
+    credentials: { title: "登录凭据", sub: "AstrBot / NapCat 面板入口（仅登录后可见）" },
     vms: { title: "虚拟机", sub: "创建、启停、快照与网页控制台" },
     logs: { title: "日志", sub: "journalctl 实时日志" },
     terminal: { title: "终端", sub: "以当前账号执行命令" },
@@ -343,7 +344,7 @@
     var nearBottom = gutter.scrollHeight - gutter.scrollTop - gutter.clientHeight < 48;
     var prevTop = gutter.scrollTop;
     gutter.dataset.follow = nearBottom ? "1" : "0";
-    gutter.innerHTML = renderQq(true);
+    gutter.innerHTML = renderGutterChat();
     if (nearBottom) gutter.scrollTop = gutter.scrollHeight;
     else gutter.scrollTop = prevTop;
   }
@@ -987,8 +988,10 @@
 
   /* 应用按容器自动检测：容器名 / 发布端口 / 页面标题命中才算存在，没有就不显示 */
   var APP_DEFS = [
-    { id: "snowluma", name: "SnowLuma", host: "snowluma", ports: [5099],
-      icon: "chat", desc: "QQ 网关与消息面板" },
+    { id: "astrbot", name: "AstrBot", host: "astrbot", ports: [6185],
+      icon: "chat", desc: "机器人控制台" },
+    { id: "napcat", name: "NapCat", host: "napcat", ports: [6099],
+      icon: "chat", desc: "QQ 协议端面板" },
     { id: "novnc", name: "noVNC", match: /novnc|vnc/i, ports: [6081],
       img: "./icons/novnc.png", icon: "monitor", desc: "远程桌面（VNC）" }
   ];
@@ -1069,6 +1072,73 @@
   }
 
 
+  /* ---------------- 登录凭据 ---------------- */
+  function credRow(label, value, secret, copyable) {
+    var copy = copyable === false ? "" :
+      '<button type="button" class="icon-btn sm" data-copy="' + esc(value) +
+      '" title="复制">' + icon("copy", 14) + "</button>";
+    var cls = "cred-row" + (label === "登录" ? " cred-meta" : "") +
+      (label === "地址" ? " cred-addr" : "");
+    return '<div class="' + cls + '">' +
+      '<span class="cred-label">' + esc(label) + "</span>" +
+      '<code class="cred-value">' + esc(secret ? "••••••••••••" : value) + "</code>" +
+      '<span class="cred-actions">' +
+        (secret ? '<button type="button" class="btn btn-text cred-mini" data-reveal="' +
+          esc(value) + '">显示</button>' : "") + copy +
+      "</span></div>";
+  }
+
+  function credCard(o) {
+    return '<article class="cred-card">' +
+      '<div class="cred-top">' +
+        '<div class="cred-icon">' + icon(o.icon, 21) + "</div>" +
+        '<div class="cred-head"><b>' + esc(o.name) + "</b><span>" + esc(o.desc) + "</span></div>" +
+        '<span class="chip ' + (o.online ? "chip-accent" : "chip-muted") + '">' +
+          (o.online ? "在线" : "离线") + "</span>" +
+      "</div>" +
+      '<div class="cred-rows">' + o.rows + "</div>" +
+      '<a class="btn btn-primary cred-open" href="' + esc(o.url) +
+        '" target="_blank" rel="noopener">' + esc(o.action) + " ↗</a>" +
+      "</article>";
+  }
+
+  function renderCredentials() {
+    var c = state.credentials;
+    if (!c) {
+      return '<section class="panel"><div class="panel-head"><div class="panel-title">' +
+        '<h3>登录凭据</h3></div></div>' +
+        emptyBlock("正在读取…", "这个页面需要登录后才能查看") + "</section>";
+    }
+    var host = location.hostname || "localhost";
+    var ab = c.astrbot || {};
+    var nc = c.napcat || {};
+    var abUrl = "http://" + host + ":" + (ab.port || 6185);
+    var ncBase = "http://" + host + ":" + (nc.port || 6099) + "/webui";
+    var ncUrl = ncBase + (nc.token ? "?token=" + encodeURIComponent(nc.token) : "");
+    var astro = credCard({
+      name: "AstrBot", desc: "机器人控制台 · 聊天、插件与日志", icon: "chat",
+      action: "打开控制台", url: abUrl, online: ab.online !== false,
+      rows: credRow("地址", abUrl) +
+        credRow("用户名", ab.username || "astrbot") +
+        credRow("密码", ab.password || "（未配置）", true) +
+        credRow("登录", "账号 + 密码", false, false)
+    });
+    var napcat = credCard({
+      name: "NapCat", desc: "QQ 协议端 · 登录态与 OneBot 配置", icon: "server",
+      action: "打开面板", url: ncUrl, online: nc.online !== false,
+      rows: credRow("地址", ncBase) +
+        credRow("Token", nc.token || "（未读到 webui.json）", true) +
+        credRow("协议", "OneBot v11 · 反向 WS 6199", false, false) +
+        credRow("登录", "带 token 直接进入", false, false)
+    });
+    return '<div class="cred-page">' +
+      '<div class="cred-grid">' + astro + napcat + "</div>" +
+      '<div class="cred-note">AstrBot 密码保存在 <code>~/.config/debnas-web/credentials.json</code>' +
+      '（权限 0600），改了面板密码记得同步改这里；NapCat token 每次从 ' +
+      '<code>webui.json</code> 实时读取。</div>' +
+      "</div>";
+  }
+
   /* ---------------- QQ 动态 ---------------- */
   function qqAvatarHtml(m) {
     var out = m.dir === "out";
@@ -1135,6 +1205,53 @@
       html += '<div class="qq-media">' + images.slice(0, 4).map(qqImageHtml).join("") + "</div>";
     }
     return html || '<span class="muted">（空）</span>';
+  }
+
+  function gutterDay(date) {
+    if (!date) return "最近";
+    var now = new Date();
+    var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+    var today = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate());
+    if (date === today) return "今天";
+    var d = new Date(date + "T00:00:00");
+    var t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var diff = Math.round((t0 - d) / 86400000);
+    if (diff === 1) return "昨天";
+    if (diff > 1 && diff < 7) return diff + " 天前";
+    return date.slice(5).replace("-", "/");
+  }
+
+  function renderGutterChat() {
+    var list = (state.qq || []).slice(-40);
+    var head = '<div class="gutter-head"><span>QQ 动态</span><span class="pulse"></span></div>';
+    if (!list.length) {
+      return head + '<div class="gchat"><div class="gchat-empty">' +
+        (state.qq ? "还没有消息" : "正在读取…") + "</div></div>";
+    }
+    var out = [];
+    var prev = null;
+    list.forEach(function (m) {
+      var ts = Number(m.ts || 0);
+      var date = m.date || "";
+      if (!prev || date !== prev.date) {
+        out.push('<div class="gchat-day">' + esc(gutterDay(date)) + "</div>");
+      }
+      var gap = prev && ts && prev.ts ? ts - prev.ts : 99999;
+      if (!prev || gap > 600) {
+        out.push('<div class="gchat-time">' + esc(String(m.time || "").slice(0, 5)) + "</div>");
+      }
+      var cont = !!prev && prev.dir === m.dir && prev.who === m.who &&
+        date === prev.date && gap <= 180;
+      var avatar = cont ? '<span class="gchat-avatar-spacer"></span>' : qqAvatarHtml(m);
+      var name = (!cont && m.dir === "in")
+        ? '<span class="gchat-name">' + esc(m.who || "QQ") + "</span>" : "";
+      out.push('<div class="gchat-row ' + (m.dir === "out" ? "out" : "in") +
+        (cont ? " cont" : "") + '">' + avatar +
+        '<div class="gchat-body">' + name +
+        '<div class="gchat-bubble">' + qqTextAndMedia(m) + "</div></div></div>");
+      prev = m;
+    });
+    return head + '<div class="gchat">' + out.join("") + "</div>";
   }
 
   function renderQq(compact) {
@@ -3343,6 +3460,7 @@
       else if (state.view === "network") { view.innerHTML = renderNetwork(); startIfacePoll(); }
       else if (state.view === "services") view.innerHTML = renderServices();
       else if (state.view === "updates") view.innerHTML = renderUpdates();
+      else if (state.view === "credentials") view.innerHTML = renderCredentials();
       else if (state.view === "vms") view.innerHTML = renderVmsPage();
       else if (state.view === "tools") view.innerHTML = renderTools();
       else view.innerHTML = toolPage(state.view);
@@ -3386,6 +3504,8 @@
         });
       }));
       jobs.push(API.loginHistory().then(function (l) { state.logins = l; }));
+    } else if (state.view === "credentials") {
+      jobs.push(API.credentials().then(function (d) { state.credentials = d; }));
     } else if (state.view === "storage") {
       jobs.push(API.storage().then(function (d) { state.storage = d; }));
     } else if (state.view === "network") {
@@ -4031,6 +4151,15 @@
         return;
       }
 
+      var revealBtn = e.target.closest("[data-reveal]");
+      if (revealBtn) {
+        var credRow = revealBtn.closest(".cred-row");
+        var credVal = credRow && credRow.querySelector(".cred-value");
+        if (credVal) credVal.textContent = revealBtn.dataset.reveal;
+        revealBtn.remove();
+        return;
+      }
+
       var copyBtn = e.target.closest("[data-copy]");
       if (copyBtn) {
         copyText(copyBtn.dataset.copy);
@@ -4117,15 +4246,6 @@
           }
         }).catch(function (err) { toast("读取失败：" + err, "error"); });
         return;
-      }
-
-      if (e.target.id === "pull") {
-        confirmDialog("拉取最新镜像并重启容器？", "会先拉取镜像再重启 SnowLuma，短暂中断后需要重新登录。", function () {
-          toast("正在拉取…", "info");
-          API.containerPull()
-            .then(function () { toast("已完成，检查容器状态", "success"); return refresh(); })
-            .catch(function (err) { toast("失败：" + err, "error"); });
-        });
       }
 
       if (e.target.id === "manage-groups") groupsDialog();
