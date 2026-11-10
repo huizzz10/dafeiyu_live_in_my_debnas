@@ -54,14 +54,21 @@ WebUI 用 Cockpit + Portainer。本项目借用了它的 NAS 场景，但控制�
 - **凭据**：AstrBot 控制台账号 / 密码、NapCat WebUI token，在线状态、复制 / 显示、
   直接打开面板；只在登录后可见
 - **虚拟机**：创建、启停、快照、扩容、换盘、删除、浏览器 VNC
-- **其他**：应用自动发现（含 AstrBot / NapCat）、QQ 动态（插件实时记录 + 会话库）、
-  mihomo 节点 / 模式 / 测速
+- **其他**：应用自动发现（含 AstrBot / NapCat）、QQ 动态（插件实时记录 + AstrBot 日志 +
+  会话库）、mihomo 节点 / 模式 / 测速
 
 界面默认跟随系统深浅色，手机端有卡片布局和抽屉导航，细节见[「界面」](#界面)。
 
 QQ 动态和凭据页需要本机自己跑 AstrBot（6185）与 NapCat（6099），仓库不负责安装
 这两个服务。AstrBot 密码放在运行账号的 `~/.config/debnas-web/credentials.json`，
 NapCat token 从它的 `webui.json` 读，配置方法见[「快速开始」](#快速开始)。
+
+QQ 动态的数据只读不写：插件写的 `astrbot_plugin_feiyu/history.jsonl` 提供毫秒时间，
+AstrBot 会话库 `data_v4.db` 补日志里缺的消息，她发出去的图片 / 表情包则从
+`journalctl` 里的 `sticker_send`、`send_message_to_user` 反推。图片按 md5 缓存在
+`/var/lib/debnas-web/media/`（`DEBNAS_WEB_STATE` 可改），原图优先用 AstrBot
+`data/temp` 下那一份，GIF 才不会被抽成静态帧。`DEBNAS_QQ_BOT_UIN` /
+`DEBNAS_QQ_OWNER` 默认是作者自己的 QQ 号，换机器要按自己的号改。
 
 mihomo 没装或架构不匹配时，跑 `sudo ./install-mihomo.sh --check` 看推荐资产，
 再跑 `sudo ./install-mihomo.sh` 安装。
@@ -76,7 +83,8 @@ mihomo 没装或架构不匹配时，跑 `sudo ./install-mihomo.sh --check` 看�
   `~/.config/debnas-portal/prefs.json`，换浏览器也生效
 - **深浅色**：默认跟随系统（登录页也跟随），也可以手动固定浅色 / 深色
 - **QQ 聊天流**：左侧留白栏按天分隔，间隔超过 10 分钟补时间，180 秒内同一人的消息
-  合并头像；标题吸顶，往上翻看旧消息时不会被新消息拉回底部
+  合并头像；标题吸顶，往上翻看旧消息时不会被新消息拉回底部；图片是异步加载的，
+  只有正贴着底部时才重新贴底，翻上去看图不会半路被拽回来；表情包和普通图片一样等比缩放
 - **形状与动效**：圆角 10 / 16 / 24 / 28 / 全圆，弹性缓动
   `cubic-bezier(.34, 1.56, .64, 1)`；系统开了「减少动态效果」就直接关掉动画
 - **离线资源**：Inter + Noto Sans SC 子集、图标、noVNC、xterm.js 都随仓库自带
@@ -165,7 +173,8 @@ NapCat 的 token 直接读
 - `DEBNAS_WEB_DEV_USER` 会按 TCP 对端免登录。Caddy 反代也来自 `127.0.0.1`，
   **生产环境绝对不能设**
 - `/deploy.sh` 是公开安装器，不走登录；不想局域网可下载就删掉 `static/deploy.sh`
-- 新建的虚拟机 VNC 只监听 `127.0.0.1`；QQ 图片 / 表情代理限制域名和 8 MB
+- 新建的虚拟机 VNC 只监听 `127.0.0.1`；QQ 图片 / 表情代理只认本机缓存里的文件名，
+  单张上限 12 MB，不接受任意路径
 - 「凭据」页只对已登录会话开放；AstrBot 密码从 0600 的
   `~/.config/debnas-web/credentials.json` 读，NapCat token 从 `webui.json` 读。
   页面会把明文交给任何登录账号，和上面「登录账号≈管理员」是同一个前提
@@ -186,7 +195,11 @@ account  required  pam_succeed_if.so user ingroup sudo
 - 上传单文件上限 16 GB；超大文件或断点续传建议走 SMB
 - 容器操作依赖运行账号的 rootless podman
 - QQ 动态只读 AstrBot 的插件历史（`astrbot_plugin_feiyu/history.jsonl`）和会话库
-  （`data_v4.db`），默认最近 24 小时、最多 80 条；SnowLuma 时代导入的旧记录不显示
+  （`data_v4.db`），默认最近 24 小时、最多 80 条；没有时间锚点的消息会被跳过
+- 她发出去的图片 / 表情包靠读 AstrBot 的 systemd 日志反推，AstrBot 不在
+  `astrbot.service` 里跑就读不到；读不到时只退回 `stickers.json` 的 `lastUsedAt`，
+  显示不全。系统表情读的是本机 QQ 客户端的缓存，换 QQ 版本或清缓存会掉图
+- 会话库里的图片是发给模型的那份压缩图：原文件被清掉后退回 base64，GIF 只剩一帧
 - AstrBot / NapCat 要自己安装并监听 6185 / 6099；凭据页只做展示，AstrBot 面板改密后
   要手动同步 `credentials.json`
 - 虚拟机控制台只支持 VNC；向导没有 UEFI / TPM，Windows 11 要手动改 XML
@@ -218,6 +231,8 @@ bash -n deploy-web.sh install-deps.sh install-mihomo.sh
 | mihomo API 不可达 | `/etc/mihomo/config.yaml` 的 `external-controller` / `secret` |
 | 凭据页显示「（未配置）」 | `~/.config/debnas-web/credentials.json` 是否存在、0600 |
 | 左侧 QQ 动态空白 | AstrBot 是否在跑，`history.jsonl` / `data_v4.db` 是否有新记录 |
+| 动态里有消息但没图 | `data/temp` 里的原图是否还在，`/var/lib/debnas-web/media/` 是否可写 |
+| 她发的表情包 / 图片不出现 | `journalctl --user-unit astrbot.service` 能不能读到 |
 
 日志：
 
@@ -236,7 +251,8 @@ sudo journalctl -u caddy -n 50 --no-pager
 - Debian、libvirt、QEMU、Samba、Caddy、mihomo 等上游项目
 
 完整信息见 [`NOTICE`](NOTICE)。
-仓库不包含 SnowLuma 的代码和 logo；AstrBot / NapCat 也只按外部服务接入。
+仓库不包含 AstrBot / NapCat 的代码，也不下载它们的资源；QQ 系统表情直接读本机
+QQ 客户端的缓存图片，表情包按插件 `stickers.json` 里的地址取一次后缓存在本机。
 
 ## 许可
 

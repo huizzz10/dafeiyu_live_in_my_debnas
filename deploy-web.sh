@@ -78,10 +78,6 @@ fi
 
 # 旧版本里带再分发限制的资源：从部署目录清掉
 rm -f "$STATIC/fonts/harmonyos-sans-sc.woff2"
-if [[ ! -f "$HERE/web/frontend/icons/snowluma.png" ]]; then
-  # 公开仓库不含 SnowLuma logo；源里没有时清掉旧部署残留
-  rm -f "$STATIC/icons/snowluma.png"
-fi
 
 # 网页控制台用的 noVNC（仓库内置，不依赖 apt）
 if [[ -f "$HERE/web/frontend/novnc/core/rfb.js" ]]; then
@@ -108,8 +104,7 @@ TMP=$(mktemp -d /tmp/debnas-src.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 base64 -d <<'DEBNAS_TARBALL'
 DEBNAS_HEADER
-  tar -C "$HERE" --exclude='web/frontend/icons/snowluma.png' \
-    -czf - deploy-web.sh install-deps.sh install-mihomo.sh LICENSE NOTICE web | base64 -w 76
+  tar -C "$HERE" -czf - deploy-web.sh install-deps.sh install-mihomo.sh LICENSE NOTICE web | base64 -w 76
   cat <<'DEBNAS_FOOTER'
 DEBNAS_TARBALL
 cd "$TMP"
@@ -123,7 +118,7 @@ echo "    已发布 ${STATIC}/deploy.sh"
 echo "==> 2/5 后端助手脚本"
 install -m 0755 "$HERE/web/helpers/samba.py" "$HERE/web/helpers/power_sampler.py" \
   "$HERE/web/helpers/autoupdate.sh" "$HERE/web/helpers/vncpass.sh" \
-  "$HERE/web/helpers/qqfeed.sh" "$HERE/install-mihomo.sh" "$LIB/"
+  "$HERE/install-mihomo.sh" "$LIB/"
 
 echo "==> 3/5 采样服务"
 install -m 0644 "$HERE/web/helpers/debnas-power.service" "$POWER_UNIT"

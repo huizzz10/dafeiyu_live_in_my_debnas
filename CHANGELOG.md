@@ -1,28 +1,50 @@
 # 变更记录
 
-## 2026-11-10（QQ 迁移到 AstrBot / NapCat，新增登录凭据）
+## 2026-11-10（消息栏：时间、图片与表情）
 
-### 新增
+### 修复
 
-- 「登录凭据」页：AstrBot 控制台地址 / 账号 / 密码、NapCat WebUI 地址 / token，
-  带在线状态、显示 / 复制按钮和直达链接；只在登录后可见
-- `credentials` RPC：AstrBot 凭据读运行账号主目录的
-  `~/.config/debnas-web/credentials.json`（0600），NapCat token 读
-  `Napcat/opt/QQ/resources/app/app_launcher/napcat/config/webui.json`；
-  两条路径可分别用 `DEBNAS_CREDENTIALS_FILE` / `DEBNAS_NAPCAT_WEBUI` 覆盖
-- 首页应用入口识别 AstrBot（6185）和 NapCat（6099）宿主进程，不再只靠容器发布端口
-- 左侧 QQ 动态改为聊天流：按天分隔、间隔超过 10 分钟补时间、180 秒内同一人的消息
-  合并头像，标题吸顶并保持滚动位置
+- 消息栏时间错乱：会话库里的时间只有 `<system_reminder>` 的分钟级精度，早期代码在
+  找不到提醒时退回 `conversations.updated_at`（整段会话最后写入的时间）并逐条 +1 秒，
+  整段聊天被顶到「最后一条消息的时间」，列表里出现一串未来时间且和插件日志重复。
+  现在时间只认提醒锚点，没锚点的消息直接跳过；合并时以插件日志的毫秒时间为准，
+  会话库只用来补日志里缺的消息
+- 她发出去的图 / 表情包不显示：她发图走的是 AstrBot 的 `sticker_send`（参数 `sticker_id`）
+  和 `send_message_to_user`（参数里 image 的 `path` / `url`），都是直接发送，不进消息链
+  也不进会话库。改为只读 AstrBot 用户日志反推发送记录，会话优先取工具结果里的
+  `Message sent to session ...`；图片缓存在 debnas 自己的 `media/`，日志读不到时退回
+  `stickers.json` 的 `lastUsedAt`
+- GIF 被抽成静态帧：会话库里的 `image_url` 是发给模型的那份 JPEG（GIF 只剩一帧），
+  改为优先读 `data/temp/media_image_*` 原文件，GIF 保留动画；原文件被清掉才退回 base64
+- 收到的图片不再依赖插件存图：改为从会话库的 `image_url`（base64 data URL）和
+  `data/temp` 原文件取；引用消息里的图和工具产出的图（B 站抽帧）会被排除
+
+### 恢复
+
+- `astrbot_plugin_feiyu/main.py` 恢复成改动前的版本，AstrBot 侧不做任何修改
 
 ### 变更
 
-- QQ 动态数据源从 SnowLuma 容器日志切到 AstrBot：合并插件的
-  `astrbot_plugin_feiyu/history.jsonl` 和 AstrBot 会话库 `data_v4.db`，取最近
-  24 小时内的记录（插件历史只认 `src=astrbot`），去重后最多显示 80 条；
-  旧 SnowLuma 导入不显示
-- 清掉消息里的内部标记（引用、system reminder、附件路径），附件只保留文件名
-- 清掉 SnowLuma 专用的 `containerPull` 接口和无入口的事件分支；按镜像拉取不受影响
-- README 补充凭据页、AstrBot / NapCat 数据源、新的响应式布局和排错项
+- README 的 QQ 动态、界面、安全、已知限制、故障排查各节按现状改写，CHANGELOG 补本条目
+
+## 2026-11-10（移除 SnowLuma 集成）
+
+### 移除
+
+- QQ 动态不再解析 SnowLuma 容器日志：删掉 `web/helpers/qqfeed.sh` 与 `_qqfeed_legacy()`，
+  只读 `astrbot_plugin_feiyu` 的 `history.jsonl` 和 AstrBot 会话库
+- 容器「更新」入口 `rpc_container_pull`（按名字找 snowluma 容器）及其路由
+- `vncpass.sh` 的 `snowluma` 默认容器名，现在必须显式传容器名
+- `web/frontend/icons/snowluma.png`、`.gitignore` 的 logo 规则、NOTICE 的 SnowLuma 段
+
+### 变更
+
+- 图片 / 表情代理 `/api/qqmedia` 改为读本机缓存：图片来自 AstrBot `data/temp` 下的原图
+  和 debnas 自己的 `media/` 缓存，表情来自 QQ 客户端的
+  `EmojiSystermResource/<id>/png`，不再依赖 SnowLuma 的 `get_image` / `fetch_face_entity`
+- 工具产出的图片（B 站抽帧）和引用消息里带的图不算她发的图，不进 `media/` 也不显示
+- `rpc_vnc` 使用前端传来的容器名，不再写死 `snowluma`
+- `deploy-web.sh` 不再处理 SnowLuma logo，也不再安装 `qqfeed.sh`
 
 ## 2026-11-08（仓库清理）
 
@@ -35,7 +57,7 @@
 
 ### 变更
 
-- README 重写为简单版并标注 vibe coding；NOTICE 的第三方说明去掉已删除的 i18n 内容
+- README 目录树与 NOTICE 的第三方说明去掉已删除的 i18n 内容
 - 同步更新上传版仓库（不含 SnowLuma logo）
 
 ## 2026-11-08（后端补齐：共享 / 用户 / 网络 / 文件 / 容器）

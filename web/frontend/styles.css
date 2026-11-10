@@ -1048,15 +1048,6 @@ html.dark .hero-status { background: rgba(255, 255, 255, .1); }
   background: color-mix(in srgb, var(--surface-container) 80%, transparent);
   border: 1px solid color-mix(in srgb, var(--outline-variant) 35%, transparent);
 }
-.qq-image.sticker {
-  width: auto;
-  max-width: 112px;
-  max-height: 112px;
-  object-fit: contain;
-  margin-inline: auto;
-  border: 0;
-  background: transparent;
-}
 .qq-bubble.out .qq-image { border-color: color-mix(in srgb, var(--on-p-container) 16%, transparent); }
 .qq-media-fallback {
   display: none;

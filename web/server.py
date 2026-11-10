@@ -17,10 +17,10 @@ import ctypes
 import ctypes.util
 import email.utils
 import fcntl
+import glob
 import grp
 import hashlib
 import hmac
-import io
 import ipaddress
 import json
 import os
@@ -44,10 +44,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import zipfile
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -552,11 +551,398 @@ def _astrbot_db_path():
                           os.path.join(home, "astrbot-src", "data", "data_v4.db"))
 
 
+def _astrbot_media_dir():
+    return os.path.join(os.path.dirname(_astrbot_history_path()), "media")
+
+
+def _qq_home():
+    user = os.environ.get("DEBNAS_WEB_RUN_AS")
+    try:
+        return pwd.getpwnam(user).pw_dir if user else os.path.expanduser("~")
+    except KeyError:
+        return os.path.expanduser("~")
+
+
+def _image_ext(raw):
+    if raw[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if raw[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return ".webp"
+    return ".jpg"
+
+
+_IMAGE_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _qq_face(face_id):
+    """读 QQ 客户端本地缓存的系统表情（240px PNG，按表情 ID 分目录放着）。"""
+    if not re.fullmatch(r"[0-9]{1,4}", face_id or ""):
+        raise ValueError("非法表情 ID")
+    root = os.path.join(_qq_home(), ".config", "QQ")
+    try:
+        entries = sorted(os.listdir(root), reverse=True)
+    except OSError:
+        raise FileNotFoundError("没有 QQ 缓存目录") from None
+    for entry in entries:
+        if not entry.startswith("nt_qq_"):
+            continue
+        folder = os.path.join(root, entry, "nt_data", "Emoji", "BaseEmojiSyastems",
+                              "EmojiSystermResource", face_id, "png")
+        for name in (face_id + ".png", face_id + "_0.png"):
+            path = os.path.join(folder, name)
+            if os.path.isfile(path):
+                with open(path, "rb") as f:
+                    return f.read(), "image/png"
+    raise FileNotFoundError("没有这个表情")
+
+
+def _qq_image(name):
+    """读聊天图片：先在插件 media 目录找，再找 debnas 自己缓存的表情包。"""
+    if not re.fullmatch(r"[A-Za-z0-9]{1,64}\.(jpg|jpeg|png|gif|webp)", name or ""):
+        raise ValueError("非法文件名")
+    for folder in (_astrbot_media_dir(), _debnas_media_dir()):
+        if not folder:
+            continue
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path):
+            continue
+        with open(path, "rb") as f:
+            data = f.read(12 * 1024 * 1024 + 1)
+        if not data or len(data) > 12 * 1024 * 1024:
+            raise ValueError("图片过大")
+        return data, _IMAGE_TYPES.get(os.path.splitext(name)[1].lower(), "application/octet-stream")
+    raise FileNotFoundError(name)
+
+
+
+def _debnas_media_dir():
+    """debnas 自己的图片缓存：收到的图和她发出去的表情包都放这儿（不写 AstrBot 目录）。"""
+    for base in (os.path.join(STATE_DIR, "media"),
+                 os.path.join(_qq_home(), ".cache", "debnas-web", "media")):
+        try:
+            os.makedirs(base, exist_ok=True)
+            return base
+        except OSError:
+            continue
+    return None
+
+
+def _astrbot_temp_dir():
+    return os.path.join(_qq_home(), "astrbot-src", "data", "temp")
+
+
+def _cache_local_image(path):
+    """AstrBot 收到的图片会原样落在 data/temp 下，GIF 也保留动画，优先用这个。
+
+    会话库里存的是 base64 JPEG（GIF 只剩一帧），所以有原文件就别用 base64。
+    """
+    home = os.path.realpath(_qq_home())
+    if not path or not os.path.isabs(path):
+        return None
+    real = os.path.realpath(path)
+    if not real.startswith(home + os.sep):
+        return None
+    folder = _debnas_media_dir()
+    if not folder:
+        return None
+    try:
+        with open(real, "rb") as fh:
+            raw = fh.read(8 * 1024 * 1024 + 1)
+    except OSError:
+        return None
+    if not raw or len(raw) > 8 * 1024 * 1024:
+        return None
+    name = hashlib.md5(raw).hexdigest() + _image_ext(raw)
+    try:
+        dest = os.path.join(folder, name)
+        if not os.path.isfile(dest):
+            with open(dest, "wb") as fh:
+                fh.write(raw)
+    except OSError:
+        return None
+    return name
+
+
+_RECEIVED_IMAGES = {}
+
+
+def _cache_received_image(url):
+    """会话库里的图片是 base64 data URL，解码后按 md5 存进 debnas 缓存目录。"""
+    if url in _RECEIVED_IMAGES:
+        return _RECEIVED_IMAGES[url]
+    folder = _debnas_media_dir()
+    name = None
+    raw = b""
+    if folder:
+        try:
+            if url.startswith("data:"):
+                _, _, payload = url.partition(",")
+                raw = base64.b64decode(payload, validate=False)
+            elif url.startswith(("http://", "https://")):
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    raw = resp.read(8 * 1024 * 1024 + 1)
+        except Exception:  # noqa: BLE001
+            raw = b""
+        if raw and len(raw) <= 8 * 1024 * 1024:
+            name = hashlib.md5(raw).hexdigest() + _image_ext(raw)
+            try:
+                dest = os.path.join(folder, name)
+                if not os.path.isfile(dest):
+                    with open(dest, "wb") as fh:
+                        fh.write(raw)
+            except OSError:
+                name = None
+    if len(_RECEIVED_IMAGES) > 800:
+        _RECEIVED_IMAGES.clear()
+    _RECEIVED_IMAGES[url] = name
+    return name
+
+
+def _sticker_catalog():
+    """只读表情清单：id -> {md5, url}。文件是 AstrBot 插件的，这里只读不写。"""
+    path = os.path.join(os.path.dirname(_astrbot_media_dir()), "stickers.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for rec in rows if isinstance(rows, list) else []:
+        if not isinstance(rec, dict):
+            continue
+        sid = str(rec.get("id") or "")
+        md5 = str(rec.get("md5") or "").lower()
+        url = str(rec.get("url") or "")
+        if sid and re.fullmatch(r"[0-9a-f]{32}", md5) and url.startswith(("http://", "https://")):
+            out[sid] = {"md5": md5, "url": url}
+    return out
+
+
+def _journal_command(hours):
+    """拼 journalctl 命令：root 直接读用户 journal 文件，普通用户走 --user-unit。"""
+    since = f"-{int(hours)}h"
+    if os.geteuid() != 0:
+        return ["journalctl", "--user-unit", "astrbot.service", "--since", since,
+                "-o", "json", "--no-pager"]
+    uid = 1000
+    user = os.environ.get("DEBNAS_WEB_RUN_AS")
+    if user:
+        try:
+            uid = pwd.getpwnam(user).pw_uid
+        except KeyError:
+            pass
+    files = []
+    for base in ("/var/log/journal", "/run/log/journal"):
+        files.extend(
+            path for path in glob.glob(os.path.join(base, "*", f"user-{uid}.journal"))
+        )
+    if files:
+        cmd = ["journalctl"]
+        for path in sorted(files)[:4]:
+            cmd += ["--file", path]
+        return cmd + ["--since", since, "-o", "json", "--no-pager"]
+    return ["journalctl", "--user-unit", "astrbot.service", "--since", since,
+            "-o", "json", "--no-pager"]
+
+
+_STICKER_SENDS = {"at": 0.0, "items": []}
+_EVENT_LINE = re.compile(r"\[default\] \[[^\]]*\] (\d+)/(\d+):")
+_SESSION_LINE = re.compile(r"Message sent to session (\w+):(\w+):(\d+)")
+_TOOL_LINE = re.compile(r"使用工具：(sticker_send|send_message_to_user)，参数：(.*)$")
+_STICKER_ARG = re.compile(r"'sticker_id': '([^']+)'")
+_IMAGE_ARG = re.compile(r"'type': 'image'[^}]*?'(?:path|file)': '([^']+)'")
+_IMAGE_URL_ARG = re.compile(r"'type': 'image'[^}]*?'url': '([^']+)'")
+
+
+def _journal_sticker_sends(hours=12):
+    """从 AstrBot 的用户日志里捡出她发出去的表情包 / 图片。
+
+    只读 journalctl，不碰 AstrBot 代码。两条发送路径都要认：
+      - sticker_send：参数里带 sticker_id
+      - send_message_to_user：参数里带 image 的 path / url
+    会话优先用工具结果里的 “Message sent to session ...”，没有就往前推事件行。
+    """
+    now = time.time()
+    if now - _STICKER_SENDS["at"] < 60:
+        return _STICKER_SENDS["items"]
+    try:
+        raw = subprocess.run(
+            _journal_command(hours), capture_output=True, text=True, timeout=25
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        raw = ""
+    items, chat, pending = [], "", []
+    for line in raw.splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        msg = rec.get("MESSAGE")
+        if not isinstance(msg, str):
+            continue
+        if rec.get("_SYSTEMD_USER_UNIT") not in (None, "", "astrbot.service"):
+            continue
+        sess = _SESSION_LINE.search(msg)
+        if sess:
+            target = ("group:" if "Group" in sess.group(2) else "private:") + sess.group(3)
+            for it in pending:
+                it["chat"] = it["chat"] or target
+            pending = []
+            continue
+        ev = _EVENT_LINE.search(msg)
+        if ev:
+            left, right = ev.group(1), ev.group(2)
+            chat = f"private:{right}" if left == right else f"group:{left}"
+            continue
+        hit = _TOOL_LINE.search(msg)
+        if not hit:
+            continue
+        try:
+            ts = int(rec.get("__REALTIME_TIMESTAMP") or 0) / 1_000_000
+        except (TypeError, ValueError):
+            continue
+        if not ts or not chat:
+            continue
+        tool, args = hit.group(1), hit.group(2)
+        found = []
+        if tool == "sticker_send":
+            m = _STICKER_ARG.search(args)
+            if m:
+                found.append({"kind": "sticker", "ref": m.group(1)})
+        else:
+            for m in _IMAGE_ARG.finditer(args):
+                found.append({"kind": "path", "ref": m.group(1)})
+            if not found:
+                for m in _IMAGE_URL_ARG.finditer(args):
+                    found.append({"kind": "url", "ref": m.group(1)})
+        if not found:
+            continue
+        for item in found:
+            it = {"ts": ts, "chat": chat, "kind": item["kind"], "ref": item["ref"]}
+            items.append(it)
+            pending.append(it)
+    _STICKER_SENDS.update(at=now, items=items)
+    return items
+
+
+def _sticker_image(sticker_id):
+    """把某张表情的图片弄成本地文件，返回文件名（失败返回 None）。"""
+    cat = _sticker_catalog().get(sticker_id)
+    folder = _debnas_media_dir() if cat else None
+    if not cat or not folder:
+        return None
+    for ext in _IMAGE_TYPES:
+        if os.path.isfile(os.path.join(folder, cat["md5"] + ext)):
+            return cat["md5"] + ext
+    try:
+        req = urllib.request.Request(cat["url"], headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            raw = resp.read(8 * 1024 * 1024 + 1)
+    except Exception:  # noqa: BLE001
+        return None
+    if not raw or len(raw) > 8 * 1024 * 1024:
+        return None
+    if raw[:3] == b"\xff\xd8\xff":
+        ext = ".jpg"
+    elif raw[:8] == b"\x89PNG\r\n\x1a\n":
+        ext = ".png"
+    elif raw[:6] in (b"GIF87a", b"GIF89a"):
+        ext = ".gif"
+    elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        ext = ".webp"
+    else:
+        ext = ".jpg"
+    name = cat["md5"] + ext
+    try:
+        with open(os.path.join(folder, name), "wb") as fh:
+            fh.write(raw)
+    except OSError:
+        return None
+    return name
+
+
+def _sticker_last_used():
+    """journal 读不到时的兜底：插件会往 stickers.json 写 lastUsedAt（毫秒）。"""
+    path = os.path.join(os.path.dirname(_astrbot_media_dir()), "stickers.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for rec in rows if isinstance(rows, list) else []:
+        if not isinstance(rec, dict):
+            continue
+        try:
+            ts = int(rec.get("lastUsedAt") or 0) / 1000
+        except (TypeError, ValueError):
+            continue
+        if ts:
+            out.append({"ts": ts, "chat": "", "kind": "sticker",
+                        "ref": str(rec.get("id") or "")})
+    return out
+
+
+def _sent_sticker_feed():
+    """把「她发了表情包」补成消息流条目（文本用 [图片]，图走本地缓存）。"""
+    now = time.time()
+    sends = _journal_sticker_sends()
+    if not sends:
+        # 没有日志可读时退回 stickers.json；会话按最近那条她发的话来归属
+        recent = [it for it in _astrbot_feed() if it.get("dir") == "out"]
+        sends = []
+        for send in _sticker_last_used():
+            near = [it for it in recent if abs(it["ts"] - send["ts"]) <= 300]
+            if not near:
+                continue
+            send["chat"] = min(near, key=lambda it: abs(it["ts"] - send["ts"]))["chat"]
+            sends.append(send)
+    out = []
+    for send in sends:
+        if not send.get("chat") or send["ts"] < now - 86400:
+            continue
+        kind = send.get("kind") or "sticker"
+        if kind == "sticker":
+            name = _sticker_image(send.get("ref") or send.get("sticker") or "")
+        elif kind == "path":
+            name = _cache_local_image(send.get("ref") or "")
+        else:
+            name = _cache_received_image(send.get("ref") or "")
+        if not name:
+            continue
+        out.append({
+            "ts": send["ts"],
+            "time": time.strftime("%H:%M:%S", time.localtime(send["ts"])),
+            "chat": send["chat"],
+            "dir": "out",
+            "name": "机器人",
+            "text": "[图片]",
+            "media": [{"kind": "image", "file": name}],
+        })
+    return out
+
+
 def _clean_feed_text(text):
     """去掉提醒/引用/附件路径这些内部标记，只留下能看的聊天文本。"""
     text = str(text or "")
     text = re.sub(r"<Quoted Message>.*?</Quoted Message>", "", text, flags=re.S)
     text = re.sub(r"<system_reminder>.*?</system_reminder>", "", text, flags=re.S)
+    # AstrBot 把工具返回的图片包成内部 user 消息，占位文本不是聊天内容。
+    # 上行文本可能已被截断（结尾没有 ]），所以按行吃到行尾。
+    text = re.sub(r"\[Image from tool [^\]\n]*\]?", "", text)
+    # 纯图片消息在模型侧会带一条附件说明，控制台只需要 [图片] 这个占位
+    text = re.sub(r"\[Image Attachment[^\]\n]*\]?", "", text)
     m = re.search(r"\[File Attachment: name ([^,\]]+)", text)
     if m:
         text = "[文件] " + m.group(1).strip()
@@ -567,7 +953,7 @@ def _clean_feed_text(text):
 
 
 def _astrbot_feed():
-    """读机器人插件新写入的实时记录（只认 src=astrbot，旧 SnowLuma 导入不显示）。"""
+    """读机器人插件新写入的实时记录（只认 src=astrbot 的行）。"""
     try:
         with open(_astrbot_history_path(), encoding="utf-8", errors="replace") as f:
             lines = f.readlines()[-1200:]
@@ -607,7 +993,8 @@ def _astrbot_feed():
             "mid": "",
             "chat": chat,
             "text": text[:240],
-            "media": [],
+            "media": [m for m in (rec.get("media") or [])
+                      if isinstance(m, dict) and m.get("file")],
         })
     return items[-80:]
 
@@ -643,12 +1030,6 @@ def _astrbot_db_feed():
             continue
         if not isinstance(content, list):
             continue
-        try:
-            updated = datetime.strptime(
-                str(row["updated_at"])[:19], "%Y-%m-%d %H:%M:%S"
-            ).replace(tzinfo=timezone.utc).timestamp()
-        except Exception:
-            updated = now
         last_ts = 0.0
         for msg in content:
             if not isinstance(msg, dict):
@@ -656,9 +1037,16 @@ def _astrbot_db_feed():
             role = str(msg.get("role") or "")
             if role not in ("user", "assistant"):
                 continue
-            texts, reminder = [], None
+            texts, images, attachments, reminder = [], [], [], None
             for part in msg.get("content") or []:
-                if not isinstance(part, dict) or part.get("type") != "text":
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "image_url":
+                    url = str((part.get("image_url") or {}).get("url") or "")
+                    if url:
+                        images.append(url)
+                    continue
+                if part.get("type") != "text":
                     continue
                 txt = str(part.get("text") or "")
                 m = re.search(r"Current datetime:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})", txt)
@@ -668,19 +1056,42 @@ def _astrbot_db_feed():
                     except Exception:
                         pass
                     continue
+                for path in re.findall(r"\[Image Attachment: original path ([^;\]]+)", txt):
+                    attachments.append(path.strip())
                 if txt.strip():
                     texts.append(txt.strip())
             text = "\n".join(texts).strip()
-            if not text:
+            # 工具产出的图片（B 站抽帧之类）只是内部上下文，不算聊天图片；
+            # 引用消息里的图是对方那条带的，别算成这条消息发出来的图
+            if "[Image from tool" in text or "<Quoted Message>" in text:
+                images = []
+                attachments = []
+            if not text and not images:
                 continue
-            if role == "user":
-                ts = reminder or updated
-                if ts <= last_ts:
-                    ts = last_ts + 1
-            else:
-                ts = (last_ts + 1) if last_ts else (updated + 1)
+            # 时间只认用户消息里 <system_reminder> 的分钟级时间；助手回复顺着往后排。
+            # 没有锚点的消息直接跳过：拿会话的 updated_at 顶替会把整段历史顶到
+            # 最后一条消息的时间上（列表里就会看到一串「未来时间」）。
+            base = reminder if reminder is not None else last_ts
+            if not base:
+                continue
+            ts = base if base > last_ts else last_ts + 1
             last_ts = ts
             if now - ts > 24 * 3600:
+                continue
+            media = []
+            # 先试 data/temp 里的原图（GIF 保留动画），没有再退回会话库的 base64
+            for path in attachments[:4]:
+                name = _cache_local_image(path)
+                if name:
+                    media.append({"kind": "image", "file": name})
+            if not media:
+                for url in images[:4]:
+                    name = _cache_received_image(url)
+                    if name:
+                        media.append({"kind": "image", "file": name})
+            if not text and media:
+                text = "[图片]"
+            if not text:
                 continue
             out = role == "assistant"
             owner = os.environ.get("DEBNAS_QQ_OWNER", "")
@@ -698,41 +1109,56 @@ def _astrbot_db_feed():
                 "mid": "",
                 "chat": chat,
                 "text": text[:240],
-                "media": [],
+                "media": media,
             })
     items.sort(key=lambda x: x["ts"])
     return items[-80:]
 
 
 def _astrbot_live_feed():
-    """插件实时日志 + 会话库合并去重；没有新数据就返回空，不再回退旧 SnowLuma 源。"""
+    """插件实时日志 + 会话库合并去重；没有新数据就返回空。"""
     hist = _astrbot_feed()
     db = _astrbot_db_feed()
     if not hist and not db:
         return []
-    seen, out = set(), []
-    for it in sorted(hist + db, key=lambda x: x["ts"]):
+    # 插件日志的时间是毫秒级真值，会话库只有分钟级的 system_reminder。
+    # 所以先收日志，再拿会话库补缺：同一段聊天里能对上（谁 + 方向 + 文本 +
+    # 三分钟内）的就并进日志那条，时间用日志的，图片也补上。
+    by_key, out = {}, []
+    for it in hist:
         text = _clean_feed_text(it.get("text", ""))
         if not text:
             continue
         it["text"] = text[:240]
-        key = (it.get("chat", ""), it.get("dir"), text[:80],
-               int(it.get("ts", 0)) // 120)
-        if key in seen:
-            continue
-        seen.add(key)
+        by_key.setdefault((it.get("chat", ""), it.get("dir"), text[:80]), []).append(it)
         out.append(it)
+    used = set()
+    for it in db:
+        text = _clean_feed_text(it.get("text", ""))
+        if not text:
+            continue
+        it["text"] = text[:240]
+        key = (it.get("chat", ""), it.get("dir"), text[:80])
+        twin = None
+        for cand in by_key.get(key, []):
+            if id(cand) in used or abs(cand["ts"] - it["ts"]) > 180:
+                continue
+            twin = cand
+            break
+        if twin is not None:
+            used.add(id(twin))
+            if it.get("media") and not twin.get("media"):
+                twin["media"] = it["media"]
+            continue
+        out.append(it)
+    # 她发出去的表情包：插件不记，debnas 从 AstrBot 日志里自己找。
+    for it in _sent_sticker_feed():
+        twin = next((c for c in out if c.get("chat") == it["chat"] and c.get("dir") == "out"
+                     and c.get("text") == "[图片]" and abs(c["ts"] - it["ts"]) <= 180), None)
+        if twin is None:
+            out.append(it)
+    out.sort(key=lambda x: x["ts"])
     return out[-80:]
-
-
-def _qqfeed_legacy():
-    p = "/usr/local/lib/debnas-portal/qqfeed.sh"
-    r = run(["/bin/bash", p], timeout=20,
-            as_user=os.environ.get("DEBNAS_WEB_RUN_AS") or None)
-    try:
-        return json.loads(r.get("out") or "[]")
-    except Exception:
-        return []
 
 
 def rpc_qq(_):
@@ -746,8 +1172,6 @@ def rpc_qq(_):
 
 MIHOMO_CONFIG = os.environ.get("DEBNAS_MIHOMO_CONFIG", "/etc/mihomo/config.yaml")
 MIHOMO_BIN = os.environ.get("DEBNAS_MIHOMO_BIN", "/usr/local/bin/mihomo")
-QQ_CONFIG = os.environ.get("DEBNAS_QQ_CONFIG", "")
-QQ_CONFIG_CACHE = {"at": 0, "cfg": None}
 MIHOMO_CACHE = {"at": 0, "api": None}
 _ELF_ARCH = {0x3E: "amd64", 0xB7: "arm64", 0x28: "arm", 0x03: "386",
              0xF3: "riscv64", 0x102: "loong64", 0x15: "ppc64",
@@ -1018,118 +1442,6 @@ def rpc_mihomo_action(params):
             raise
         return {"delay": int(res.get("delay") or 0)}
     raise ValueError("未知操作")
-
-
-def _qq_config():
-    now = time.time()
-    if QQ_CONFIG_CACHE["cfg"] and now - QQ_CONFIG_CACHE["at"] < 300:
-        return QQ_CONFIG_CACHE["cfg"]
-    path = QQ_CONFIG
-    if not path:
-        user = os.environ.get("DEBNAS_WEB_RUN_AS")
-        try:
-            home = pwd.getpwnam(user).pw_dir if user else os.path.expanduser("~")
-        except KeyError:
-            home = os.path.expanduser("~")
-        path = os.path.join(home, "fish", "qq-bridge", "config.json")
-    cfg = {"http": "http://127.0.0.1:3000", "token": ""}
-    try:
-        with open(path, encoding="utf-8", errors="replace") as f:
-            data = json.load(f)
-        sl = data.get("snowluma") or {}
-        http = str(sl.get("httpUrl") or cfg["http"]).replace("0.0.0.0", "127.0.0.1")
-        http = http.replace("[::]", "127.0.0.1").rstrip("/")
-        if not http.startswith(("http://", "https://")):
-            http = "http://" + http
-        cfg = {"http": http, "token": str(sl.get("accessToken") or "")}
-    except Exception:
-        pass
-    QQ_CONFIG_CACHE.update(at=now, cfg=cfg)
-    return cfg
-
-
-def _qq_image_url(file_ref):
-    cfg = _qq_config()
-    url = cfg["http"] + "/get_image?file=" + quote(file_ref, safe="")
-    headers = {"Accept": "application/json"}
-    if cfg["token"]:
-        headers["Authorization"] = "Bearer " + cfg["token"]
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        data = json.loads(resp.read(1024 * 1024).decode("utf-8", "replace"))
-    payload = data.get("data") or {}
-    candidate = str(payload.get("url") or payload.get("file") or "")
-    parsed = urlparse(candidate)
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or not (host.endswith(".qq.com") or
-                                       host.endswith(".qq.com.cn") or
-                                       host.endswith(".gtimg.cn")):
-        raise ValueError("图片地址不可用")
-    return candidate
-
-
-def _qq_image_bytes(data, ctype=""):
-    if not data or len(data) > 8 * 1024 * 1024:
-        raise ValueError("图片过大")
-    magic = data[:12]
-    if magic.startswith(b"\xff\xd8\xff"):
-        ctype = "image/jpeg"
-    elif magic.startswith(b"\x89PNG\r\n\x1a\n"):
-        ctype = "image/png"
-    elif magic.startswith(b"GIF8"):
-        ctype = "image/gif"
-    elif magic[:4] == b"RIFF" and magic[8:12] == b"WEBP":
-        ctype = "image/webp"
-    elif not ctype.startswith("image/"):
-        raise ValueError("不是图片")
-    return data, ctype
-
-
-def _qq_download(url):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        data = resp.read(8 * 1024 * 1024 + 1)
-    return _qq_image_bytes(data, ctype)
-
-
-def _qq_face(face_id):
-    """用 SnowLuma 的表情实体取正确图片。
-
-    不能直接拼 qzonestyle 的 e<id>.gif：新版 QQ 表情 ID（如 182=笑哭）和旧 CDN
-    编号不是一套，e182.gif 实际是“比耶”。SnowLuma 的 fetch_face_entity 会返回
-    q_des 和资源 zip，里面是 128px PNG。
-    """
-    if not re.fullmatch(r"[0-9]{1,4}", face_id or ""):
-        raise ValueError("非法表情 ID")
-    cfg = _qq_config()
-    url = cfg["http"] + "/fetch_face_entity?face_id=" + face_id
-    headers = {"Accept": "application/json"}
-    if cfg["token"]:
-        headers["Authorization"] = "Bearer " + cfg["token"]
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        data = json.loads(resp.read(1024 * 1024).decode("utf-8", "replace"))
-    info = data.get("data") or {}
-    face_url = str(info.get("url") or "")
-    parsed = urlparse(face_url)
-    host = (parsed.hostname or "").lower()
-    if parsed.scheme != "https" or not (host.endswith(".qq.com") or
-                                       host.endswith(".qq.com.cn") or
-                                       host.endswith(".gtimg.cn")):
-        raise ValueError("表情地址不可用")
-    req = urllib.request.Request(face_url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        raw = resp.read(8 * 1024 * 1024 + 1)
-    if not raw or len(raw) > 8 * 1024 * 1024:
-        raise ValueError("表情资源过大")
-    if raw[:2] == b"PK":
-        with zipfile.ZipFile(io.BytesIO(raw)) as z:
-            for name in z.namelist():
-                if name.lower().endswith((".png", ".gif", ".webp", ".jpg", ".jpeg")):
-                    return _qq_image_bytes(z.read(name))
-        raise ValueError("表情资源里没有图片")
-    return _qq_image_bytes(raw)
 
 
 def rpc_net(_):
@@ -1421,7 +1733,10 @@ def rpc_vnc(params):
     user = params.get("user", "")
     if not re.fullmatch(r"[A-Za-z0-9._-]+", user):
         raise ValueError("非法用户名")
-    return run(["/bin/bash", "/usr/local/lib/debnas-portal/vncpass.sh", user, "snowluma"], timeout=30)
+    container = params.get("container", "")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", container):
+        raise ValueError("非法容器名")
+    return run(["/bin/bash", "/usr/local/lib/debnas-portal/vncpass.sh", user, container], timeout=30)
 
 
 # ---------------------------------------------------------------- 虚拟机（libvirt）
@@ -2386,26 +2701,6 @@ def rpc_upload_abort(params):
         except OSError:
             pass
     return {"ok": True}
-
-
-def rpc_container_pull(_):
-    run_as = os.environ.get("DEBNAS_WEB_RUN_AS") or None
-    items = rpc_containers(None)
-    cand = [c for c in items
-            if "snowluma" in (str(c.get("name", "")) + str(c.get("image", ""))).lower()]
-    if not cand:
-        raise ValueError("没有找到 SnowLuma 容器")
-    target = cand[0]
-    prefix = "XDG_RUNTIME_DIR=/run/user/$(id -u) podman "
-    r = run(["sh", "-c", prefix + "pull " + shlex.quote(target["image"])],
-            as_user=run_as, timeout=1800)
-    if not r.get("ok"):
-        raise RuntimeError("拉取镜像失败：%s" % (r.get("err") or r.get("out")).strip()[-400:])
-    r = run(["sh", "-c", prefix + "restart " + shlex.quote(target["name"])],
-            as_user=run_as, timeout=120)
-    if not r.get("ok"):
-        raise RuntimeError("重启容器失败：%s" % (r.get("err") or r.get("out")).strip()[-400:])
-    return {"ok": True, "image": target["image"], "container": target["name"]}
 
 
 def rpc_portal_redeploy(params):
@@ -3498,7 +3793,6 @@ RPC = {
     "net_detail": rpc_net_detail,
     "net_set4": rpc_net_set4,
     "net_link": rpc_net_link,
-    "container_pull": rpc_container_pull,
     "portal_redeploy": rpc_portal_redeploy,
     "cockpit_apps": rpc_cockpit_apps,
     "login_history": rpc_login_history,
@@ -3793,7 +4087,7 @@ class Handler(BaseHTTPRequestHandler):
         ws_term_bridge(self.connection, self.rfile, user, home, cols, rows)
 
     def api_qqmedia(self):
-        """代理 QQ 图片 / 系统表情，避免 Tencent 的 rkey 过期和 Referer 限制。"""
+        """代理聊天里的图片和系统表情：都是本机缓存，不碰 QQ 的 CDN。"""
         sess = get_session(self.cookie_token()) or self.dev_session()
         if not sess:
             return self.send_json({"error": "未登录"}, 401)
@@ -3802,19 +4096,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if kind == "face":
                 data, ctype = _qq_face((qs.get("id") or [""])[0])
-                cache = "private, max-age=604800"
             else:
-                file_ref = (qs.get("file") or [""])[0]
-                if not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", file_ref):
-                    raise ValueError("非法文件名")
-                data, ctype = _qq_download(_qq_image_url(file_ref))
-                cache = "private, max-age=300"
+                data, ctype = _qq_image((qs.get("file") or [""])[0])
         except Exception:
             return self.send_json({"error": "媒体不可用"}, 404)
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", cache)
+        self.send_header("Cache-Control", "private, max-age=604800")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         try:

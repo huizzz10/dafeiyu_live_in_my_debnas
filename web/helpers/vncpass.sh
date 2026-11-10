@@ -4,10 +4,14 @@
 set -euo pipefail
 
 USER_NAME="${1:-}"
-CONTAINER="${2:-snowluma}"
+CONTAINER="${2:-}"
 
 if [[ -z "$USER_NAME" ]]; then
   echo '{"error":"missing user"}' >&2
+  exit 2
+fi
+if [[ -z "$CONTAINER" ]]; then
+  echo '{"error":"missing container"}' >&2
   exit 2
 fi
 

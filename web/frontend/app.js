@@ -347,6 +347,14 @@
     gutter.innerHTML = renderGutterChat();
     if (nearBottom) gutter.scrollTop = gutter.scrollHeight;
     else gutter.scrollTop = prevTop;
+    // 图片是异步加载的，加载完会把内容顶高；跟着底部的时候再贴一次底，
+    // 否则一出现图片就会被判定成「用户翻上去了」，之后新消息不再自动跟。
+    Array.prototype.forEach.call(gutter.querySelectorAll("img.qq-image"), function (img) {
+      if (img.complete) return;
+      img.addEventListener("load", function () {
+        if (gutter.dataset.follow === "1") gutter.scrollTop = gutter.scrollHeight;
+      });
+    });
   }
 
   function applyServices(w) {
@@ -1152,27 +1160,6 @@
     return '<span class="qq-avatar' + (out ? " out" : "") + '">' + img + esc(initial) + "</span>";
   }
 
-  function qqFaceImg(id, cls) {
-    var safe = String(id || "").replace(/[^0-9]/g, "");
-    if (!safe) return "";
-    return '<span class="qq-face-box"><img class="qq-face' + (cls ? " " + cls : "") +
-      '" src="/api/qqmedia?kind=face&amp;id=' + safe +
-      '" alt="[表情]" loading="lazy" decoding="async" ' +
-      'onerror="this.parentNode.classList.add(\'broken\');this.remove()" />' +
-      '<span class="qq-face-fallback">[表情]</span></span>';
-  }
-
-  function qqImageHtml(item) {
-    var file = String(item && item.file || "").replace(/[^A-Za-z0-9._-]/g, "");
-    if (!file) return "";
-    var sticker = String(item.subType || "") === "1" || /动画表情/.test(item.summary || "");
-    return '<span class="qq-media-item"><img class="qq-image' + (sticker ? " sticker" : "") +
-      '" src="/api/qqmedia?kind=image&amp;file=' + encodeURIComponent(file) +
-      '" alt="' + esc(item.summary || "图片") + '" loading="lazy" decoding="async" ' +
-      'onerror="this.parentNode.classList.add(\'broken\');this.remove()" />' +
-      '<span class="qq-media-fallback">[图片]</span></span>';
-  }
-
   // 左侧窄栏只显示回复正文，去掉又长又占地方的 [回复 ...] 引用前缀
   function stripReplyPrefix(text) {
     var t = String(text || "").trim();
@@ -1189,20 +1176,34 @@
     return t;
   }
 
-  function qqTextAndMedia(m) {
+  function qqFaceImg(id, cls) {
+    var safe = String(id || "").replace(/[^0-9]/g, "");
+    if (!safe) return "";
+    return '<span class="qq-face-box"><img class="qq-face' + (cls ? " " + cls : "") +
+      '" src="/api/qqmedia?kind=face&amp;id=' + safe +
+      '" alt="[表情]" loading="lazy" decoding="async" ' +
+      'onerror="this.parentNode.classList.add(\'broken\');this.remove()" />' +
+      '<span class="qq-face-fallback">[表情]</span></span>';
+  }
+
+  function qqText(m) {
     var text = String(m.text || "");
-    var media = Array.isArray(m.media) ? m.media : [];
-    var images = media.filter(function (x) { return x && x.kind !== "face" && x.file; });
-    var faces = media.filter(function (x) { return x && x.kind === "face" && x.faceId; });
-    if (images.length && /^\[(图片|动画表情|表情)\]$/.test(text.trim())) text = "";
-    if (faces.length) text = text.replace(/\[表情\]/g, "");
-    var html = esc(text);
-    html = html.replace(/\[表情(\d+)\]/g, function (_, id) { return qqFaceImg(id, "inline"); });
-    faces.forEach(function (f) {
-      if (text.indexOf("[表情" + f.faceId + "]") < 0) html += qqFaceImg(f.faceId);
+    var media = Array.isArray(m.media) ? m.media.filter(function (x) {
+      return x && x.file;
+    }) : [];
+    if (media.length) text = text.replace(/\[图片\]/g, "").trim();
+    var html = esc(text).replace(/\[表情(\d+)\]/g, function (_, id) {
+      return qqFaceImg(id, "inline");
     });
-    if (images.length) {
-      html += '<div class="qq-media">' + images.slice(0, 4).map(qqImageHtml).join("") + "</div>";
+    if (media.length) {
+      html += '<div class="qq-media">' + media.slice(0, 4).map(function (item) {
+        var file = String(item.file || "").replace(/[^A-Za-z0-9._-]/g, "");
+        if (!file) return "";
+        return '<span class="qq-media-item"><img class="qq-image" src="/api/qqmedia?kind=image&amp;file=' +
+          encodeURIComponent(file) + '" alt="[图片]" loading="lazy" decoding="async" ' +
+          'onerror="this.parentNode.classList.add(\'broken\');this.remove()" />' +
+          '<span class="qq-media-fallback">[图片]</span></span>';
+      }).join("") + "</div>";
     }
     return html || '<span class="muted">（空）</span>';
   }
@@ -1248,7 +1249,7 @@
       out.push('<div class="gchat-row ' + (m.dir === "out" ? "out" : "in") +
         (cont ? " cont" : "") + '">' + avatar +
         '<div class="gchat-body">' + name +
-        '<div class="gchat-bubble">' + qqTextAndMedia(m) + "</div></div></div>");
+        '<div class="gchat-bubble">' + qqText(m) + "</div></div></div>");
       prev = m;
     });
     return head + '<div class="gchat">' + out.join("") + "</div>";
@@ -1256,7 +1257,7 @@
 
   function renderQq(compact) {
     var limit = compact ? 12 : 4;
-    // qqfeed 已按日志顺序（旧 → 新）返回；不要再按 HH:MM:SS 排序，
+    // 后端已按时间顺序（旧 → 新）返回；不要再按 HH:MM:SS 排序，
     // 否则跨午夜时 00:xx 会被当成“最早”，最新消息反而被挤掉。
     var list = (state.qq || []).slice(-limit);
     if (!list.length) {
@@ -1271,7 +1272,7 @@
         (m.dir === "in" ? "<b>" + esc(m.who) + "</b>" : "") + "</div>";
       var bodyText = compact ? stripReplyPrefix(m.text) : m.text;
       var body = '<div class="qq-text">' +
-        qqTextAndMedia({ text: bodyText || m.text, media: m.media }) + "</div>";
+        qqText({ text: bodyText || m.text, media: m.media }) + "</div>";
       if (m.dir === "in") {
         return '<div class="qq-row in">' + qqAvatarHtml(m) +
           '<div class="qq-bubble">' + meta + body + "</div></div>";
