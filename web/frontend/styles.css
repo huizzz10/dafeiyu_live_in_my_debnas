@@ -1558,6 +1558,55 @@ html.dark .hero-status { background: rgba(255, 255, 255, .1); }
 .mh-state.off { color: var(--on-surface-variant); }
 .mh-state.err { color: var(--error); }
 .mh-state.wait { color: var(--p); }
+/* DeepSeek 余额块：沿用 mihomo 的卡片材质，只加余额排版 */
+.ds-dock .mh-brand-text { text-transform: none; }
+.ds-mark {
+  background: linear-gradient(135deg, #4d6bfe, #2f3fd8);
+  color: #fff;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.ds-balance {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 2px 0 0;
+}
+.ds-sym {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--on-surface-variant);
+}
+.ds-num {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ds-tag {
+  margin-inline-start: 6px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+  color: var(--error);
+}
+.ds-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--outline-variant) 30%, transparent);
+}
+.ds-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.ds-row span { color: var(--on-surface-variant); }
+.ds-row b { font-variant-numeric: tabular-nums; font-weight: 600; }
+
 .mh-fold {
   border: 0;
   background: transparent;

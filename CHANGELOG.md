@@ -1,5 +1,22 @@
 # 变更记录
 
+## 2026-11-10（新增 DeepSeek 余额块）
+
+- 右侧栏 mihomo 块下面新增 DeepSeek 余额块：显示账户余额、充值 / 赠送明细和更新时间，
+  每 60 秒自动刷新，也可以点「刷新」立即查；点右上角箭头收起，状态记在 `localStorage`
+- 余额由 DebNAS 后端代查（`POST /api/rpc` 的 `deepseek`，服务端缓存 60 秒，失败 15 秒后
+  重试），密钥只从环境变量 `DEEPSEEK_API_KEY` 或 `~/.config/deepseek/env` 读，
+  不下发到浏览器；「刷新」最少隔 5 秒，避免连点把第三方接口刷爆
+- 接口不通 / 没配密钥时块里直接显示原因，不会把控制台搞崩
+
+### 安全
+
+- DeepSeek 密钥只在服务端读取，余额接口只返回余额 / 充值 / 赠送，不返回密钥；
+  建议把 `DEEPSEEK_API_KEY` 放在 0600 的 `~/.config/deepseek/env`，不要写进 unit
+- 「刷新」也至少隔 5 秒，避免连点被第三方接口限流
+- 合并本机代码时别把真实 QQ 号 / 人设名 / 局域网 IP 带回默认值：`DEBNAS_QQ_*`
+  仍是中性占位，QQ 身份一律走环境变量
+
 ## 2026-11-10（消息栏：时间、图片与表情）
 
 ### 修复
@@ -12,7 +29,7 @@
 - 她发出去的图 / 表情包不显示：她发图走的是 AstrBot 的 `sticker_send`（参数 `sticker_id`）
   和 `send_message_to_user`（参数里 image 的 `path` / `url`），都是直接发送，不进消息链
   也不进会话库。改为只读 AstrBot 用户日志反推发送记录，会话优先取工具结果里的
-  `Message sent to session ...`；图片缓存在 debnas 自己的 `media/`，日志读不到时退回
+  `Message sent to session ...`；图片缓存在 DebNAS 自己的 `media/`，日志读不到时退回
   `stickers.json` 的 `lastUsedAt`
 - GIF 被抽成静态帧：会话库里的 `image_url` 是发给模型的那份 JPEG（GIF 只剩一帧），
   改为优先读 `data/temp/media_image_*` 原文件，GIF 保留动画；原文件被清掉才退回 base64

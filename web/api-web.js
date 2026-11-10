@@ -95,6 +95,7 @@
     qqFeed: function () { return rpc("qq"); },
     credentials: function () { return rpc("credentials"); },
     mihomo: function () { return rpc("mihomo"); },
+    deepseek: function (force) { return rpc("deepseek", force ? { force: true } : {}); },
     mihomoAction: function (p) { return rpc("mihomo_action", p || {}); },
     mihomoImport: function (data) { return rpc("mihomo_import", { data: data }); },
     powerSample: function () { return rpc("power"); },

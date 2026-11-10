@@ -1406,6 +1406,74 @@ def _mihomo_resolve(proxies, name, depth=0):
     return name
 
 
+DS_BALANCE = {"at": 0.0, "data": None}
+DS_BALANCE_TTL = float(os.environ.get("DEBNAS_DEEPSEEK_TTL", "60"))
+# 即使点「刷新」也至少隔 5 秒，避免把第三方额度和接口 QPS 浪费在连点上
+DS_FORCE_MIN = 5.0
+DS_API = "https://api.deepseek.com/user/balance"
+
+
+def _deepseek_key():
+    """密钥只从环境变量或 ~/.config/deepseek/env 读，绝不发给前端。"""
+    key = str(os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+    if key:
+        return key
+    path = os.path.join(_qq_home(), ".config", "deepseek", "env")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("DEEPSEEK_API_KEY="):
+                    return line.split("=", 1)[1].strip().strip("'\"")
+    except OSError:
+        pass
+    return ""
+
+
+def rpc_deepseek(params):
+    """查 DeepSeek 账户余额（服务端代取，前端只拿余额）。"""
+    now = time.time()
+    cached = DS_BALANCE["data"]
+    ttl = DS_BALANCE_TTL if cached and cached.get("ok") else min(DS_BALANCE_TTL, 15.0)
+    force = bool(params.get("force")) if isinstance(params, dict) else False
+    if cached is not None and now - DS_BALANCE["at"] < (DS_FORCE_MIN if force else ttl):
+        return cached
+    key = _deepseek_key()
+    if not key:
+        data = {"ok": False, "error": "没找到 DEEPSEEK_API_KEY（环境变量或 ~/.config/deepseek/env）"}
+    else:
+        try:
+            req = urllib.request.Request(DS_API, headers={
+                "Authorization": "Bearer " + key,
+                "Accept": "application/json",
+                "User-Agent": "debnas-web",
+            })
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.loads(resp.read().decode("utf-8", "replace"))
+            items = []
+            for it in payload.get("balance_infos") or []:
+                if not isinstance(it, dict):
+                    continue
+                items.append({
+                    "currency": str(it.get("currency") or ""),
+                    "total": str(it.get("total_balance") or ""),
+                    "granted": str(it.get("granted_balance") or ""),
+                    "topped": str(it.get("topped_up_balance") or ""),
+                })
+            data = {
+                "ok": True,
+                "available": bool(payload.get("is_available")),
+                "items": items,
+                "at": int(now),
+            }
+        except urllib.error.HTTPError as exc:
+            data = {"ok": False, "error": "接口返回 %d" % exc.code}
+        except Exception:  # noqa: BLE001
+            data = {"ok": False, "error": "请求 api.deepseek.com 失败"}
+    DS_BALANCE.update(at=now, data=data)
+    return data
+
+
 def rpc_mihomo(_):
     host = _host_isa()
     bin_arch = _elf_arch(MIHOMO_BIN)
@@ -3807,6 +3875,7 @@ RPC = {
     "credentials": rpc_credentials,
     "qq": rpc_qq,
     "mihomo": rpc_mihomo,
+    "deepseek": rpc_deepseek,
     "mihomo_action": rpc_mihomo_action,
     "mihomo_import": rpc_mihomo_import,
     "net": rpc_net,

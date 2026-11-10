@@ -157,7 +157,7 @@
     } catch (e) { done(); }
   }
 
-  var live = { started: false, realtimeTimer: null, qqTimer: null, appTimer: null, mihomoTimer: null, ifaceTimer: null, hwTimer: null, ifaceHist: [], netLast: null, netHist: [], pwHist: [] };
+  var live = { started: false, realtimeTimer: null, qqTimer: null, appTimer: null, mihomoTimer: null, dsTimer: null, ifaceTimer: null, hwTimer: null, ifaceHist: [], netLast: null, netHist: [], pwHist: [] };
   var HIST_MAX = 45;
 
   function fmtRate(bps) {
@@ -525,6 +525,97 @@
     if (live.mihomoTimer) return;
     pollMihomo();
     live.mihomoTimer = setInterval(function () { if (!document.hidden) once("mihomo", pollMihomo); }, 12000);
+  }
+
+  /* ---------------- DeepSeek 余额块 ---------------- */
+  function deepseekOpen() {
+    try {
+      var v = localStorage.getItem("debnas-deepseek-open");
+      if (v !== null) return v !== "0";
+    } catch (e) {}
+    return window.innerWidth >= 1400;
+  }
+
+  function setDeepseekOpen(v) {
+    try { localStorage.setItem("debnas-deepseek-open", v ? "1" : "0"); } catch (e) {}
+  }
+
+  function dsMoney(v) {
+    var n = parseFloat(v);
+    if (isNaN(n)) return "—";
+    return (n >= 1000 ? n.toFixed(0) : n.toFixed(2));
+  }
+
+  function renderDeepseekDock(force) {
+    var dock = $("#deepseek-dock");
+    if (!dock) return;
+    var ae = document.activeElement;
+    if (!force && ae && dock.contains(ae)) return;
+    var d = state.deepseek;
+    var open = deepseekOpen();
+    dock.hidden = false;
+    dock.className = "mh-dock ds-dock" + (open ? " open" : " collapsed");
+
+    var main = d && d.ok && (d.items || [])[0] ? d.items[0] : null;
+    var st = "读取中", cls = "wait";
+    if (d) {
+      if (!d.ok) { st = "读取失败"; cls = "err"; }
+      else if (!d.available) { st = "余额不足"; cls = "warn"; }
+      else if (main) { st = (main.currency === "CNY" ? "¥" : "") + dsMoney(main.total); cls = "ok"; }
+      else { st = "无余额记录"; cls = "warn"; }
+    }
+
+    var head = '<div class="mh-head"><span class="mh-brand"><span class="mh-mark ds-mark">D</span>' +
+      '<span class="mh-brand-text">DeepSeek</span></span>' +
+      '<span class="mh-state ' + cls + '"><i></i>' + esc(st) + '</span>' +
+      '<button class="mh-fold" id="ds-fold" type="button" title="' + (open ? "收起" : "展开") + '">' +
+      (open ? "⌄" : "⌃") + "</button></div>";
+    if (!open) { dock.innerHTML = head; return; }
+
+    var body;
+    if (!d) {
+      body = '<div class="mh-note">正在查询余额…</div>';
+    } else if (!d.ok) {
+      body = '<div class="mh-note">' + esc(d.error || "查询失败") + "</div>" +
+        '<div class="mh-actions"><button class="mh-btn" id="ds-refresh" type="button">重试</button></div>';
+    } else if (!main) {
+      body = '<div class="mh-note">接口没有返回余额。</div>' +
+        '<div class="mh-actions"><button class="mh-btn" id="ds-refresh" type="button">刷新</button></div>';
+    } else {
+      var sym = main.currency === "CNY" ? "¥" : (main.currency === "USD" ? "$" : "");
+      var rows = (d.items || []).map(function (it) {
+        var s2 = it.currency === "CNY" ? "¥" : (it.currency === "USD" ? "$" : "");
+        return '<div class="ds-row"><span>充值' + (it.currency ? "（" + esc(it.currency) + "）" : "") +
+          '</span><b>' + s2 + dsMoney(it.topped) + "</b></div>" +
+          '<div class="ds-row"><span>赠送</span><b>' + s2 + dsMoney(it.granted) + "</b></div>";
+      }).join("");
+      var at = d.at ? new Date(d.at * 1000) : null;
+      var when = at ? ("0" + at.getHours()).slice(-2) + ":" + ("0" + at.getMinutes()).slice(-2) : "—";
+      body = '<div class="ds-balance"><span class="ds-sym">' + esc(sym) + "</span>" +
+        '<span class="ds-num">' + esc(dsMoney(main.total)) + "</span>" +
+        (d.available ? "" : '<span class="ds-tag">不可用</span>') + "</div>" +
+        '<div class="ds-rows">' + rows + "</div>" +
+        '<div class="mh-meta">' + esc(when) + " 更新 · 每 60 秒自动刷新</div>" +
+        '<div class="mh-actions"><button class="mh-btn" id="ds-refresh" type="button">刷新</button></div>';
+    }
+    dock.innerHTML = head + '<div class="mh-body">' + body + "</div>";
+  }
+
+  function pollDeepseek(force) {
+    if (document.hidden) return Promise.resolve();
+    return API.deepseek(!!force).then(function (d) {
+      state.deepseek = d;
+      renderDeepseekDock(force);
+    }).catch(function (e) {
+      state.deepseek = { ok: false, error: String(e && e.message || e) };
+      renderDeepseekDock(force);
+    });
+  }
+
+  function startDeepseekPolling() {
+    if (live.dsTimer) return;
+    pollDeepseek();
+    live.dsTimer = setInterval(function () { if (!document.hidden) once("deepseek", pollDeepseek); }, 60000);
   }
 
   function mihomoSetMode(mode) {
@@ -4047,7 +4138,7 @@
 
     document.addEventListener("visibilitychange", function () {
       if (document.hidden) {
-        ["realtimeTimer", "qqTimer", "appTimer", "mihomoTimer", "hwTimer", "ifaceTimer"].forEach(function (k) {
+        ["realtimeTimer", "qqTimer", "appTimer", "mihomoTimer", "dsTimer", "hwTimer", "ifaceTimer"].forEach(function (k) {
           if (live[k]) { clearInterval(live[k]); live[k] = null; }
         });
         live.started = false;
@@ -4057,6 +4148,7 @@
         startQqPolling();
         startAppPolling();
         startMihomoPolling();
+        startDeepseekPolling();
         startHwPolling();
         if (state.view === "network") startIfacePoll();
       }
@@ -4458,6 +4550,12 @@
       if (e.target.closest("#mh-restart")) { mihomoService("restart"); return; }
       if (e.target.closest("#mh-start")) { mihomoService("start"); return; }
       if (e.target.closest("#mh-retry")) { pollMihomo(); return; }
+      if (e.target.closest("#ds-fold")) {
+        setDeepseekOpen(!deepseekOpen());
+        renderDeepseekDock(true);
+        return;
+      }
+      if (e.target.closest("#ds-refresh")) { pollDeepseek(true); return; }
     });
 
     document.addEventListener("change", function (e) {
@@ -4603,6 +4701,7 @@
       startQqPolling();
       startAppPolling();
       startMihomoPolling();
+      startDeepseekPolling();
       startHwPolling();
       return refresh();
     }).catch(function (err) {
