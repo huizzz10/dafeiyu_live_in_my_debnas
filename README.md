@@ -16,7 +16,7 @@
 > [!WARNING]
 > **这是 vibe coding 产物。** 代码、样式、脚本和文档主要在和 AI 的
 > “描述 → 生成 → 实测 → 修”循环里产出；需求、验收和发布由作者负责。
-> 它在一台 Debian 13 NAS 上日常使用，但**没有自动化测试，也没有安全审计**。
+> 它在一台 Debian 13 NAS 上日常使用，但**没有自动化测试，也没有系统性的安全审计**。
 > 不要直接暴露到公网；上重要数据前先备份、先试，并读一下[「安全」](#安全)。
 
 [这是什么](#这是什么) · [功能](#功能一览) · [界面](#界面) · [快速开始](#快速开始) ·
@@ -64,7 +64,7 @@ WebUI 用 Cockpit + Portainer。本项目借用了它的 NAS 场景，但控制�
   直接打开面板；只在登录后可见
 - **虚拟机**：创建、启停、快照、扩容、换盘、删除、浏览器 VNC
 - **其他**：应用自动发现（扫描容器端口和 AstrBot / NapCat 宿主进程）、QQ 动态、
-  mihomo 节点 / 模式 / 测速、API 余额（自动探测用哪家 key）
+  mihomo 节点 / 模式 / 测速、API 余额（自动探测多家 key，逐家显示模型与余额）
 
 界面默认跟随系统深浅色，手机端有卡片布局和抽屉导航，细节见[「界面」](#界面)。
 
@@ -80,12 +80,15 @@ QQ 动态和凭据页需要本机自己跑 AstrBot（6185）与 NapCat（6099）
   tone / chroma 推导 primary、tertiary 等角色色；选择按账号存
   `~/.config/debnas-portal/prefs.json`，换浏览器也生效
 - **深浅色**：默认跟随系统（登录页也跟随），也可以手动固定浅色 / 深色
-- **QQ 聊天流**：左侧留白栏按天分隔，间隔超过 10 分钟补时间，180 秒内同一人的消息
-  合并头像；标题吸顶，往上翻看旧消息时不会被新消息拉回底部；图片异步加载，
-  只有正贴着底部时才重新贴底；表情包和普通图片一样等比缩放；新消息 3 秒一轮自动上屏
+- **QQ 聊天流**：群聊 / 私聊两条独立流可切换；左侧留白栏按天分隔，间隔超过 10 分钟
+  补时间点，180 秒内同一人的消息合并头像；标题吸顶，往上翻看旧消息时不会被新消息
+  拉回底部；图片异步加载，只有正贴着底部时才重新贴底；表情包和普通图片一样等比缩放；
+  新消息 3 秒一轮自动上屏
 - **形状与动效**：圆角 10 / 16 / 24 / 28 / 全圆，弹性缓动
   `cubic-bezier(.34, 1.56, .64, 1)`；系统开了「减少动态效果」就直接关掉动画
 - **离线资源**：Inter + Noto Sans SC 子集、图标、noVNC、xterm.js 都随仓库自带
+- **版本**：右侧「系统」块显示 `内核 … · DebNAS 0.1.0`，系统信息里的「界面版本」读
+  同一份 `VERSION`；读不到时统一回落成 `unknown`，右侧不显示版本号
 - **响应式**：宽屏（≥1400px）左右留白栏常驻（左 QQ 动态、右硬件卡 / mihomo /
   API 余额块）；
   1400–1599px 隐藏消息头像，把宽度让给正文；≤900px 改抽屉导航、凭据页变单列；
@@ -128,6 +131,9 @@ curl -s http://127.0.0.1:8080/api/health     # {"ok": true}
 ```bash
 curl -fsSLk https://<已部署的主机>/deploy.sh | sudo bash
 ```
+
+> `-k` 是为自签证书关掉 TLS 校验，脚本又是直接 `sudo bash`。只在可信局域网里这么用；
+> 不确定网络是否干净时，先 `curl -o deploy.sh` 下来看一眼再执行。
 
 ### 配 HTTPS（推荐）
 
@@ -214,7 +220,8 @@ apt 依赖、Samba 配置、libvirt 里的虚拟机不在卸载范围内，按�
 
 仓库不分发、也不安装这两个服务。想让左侧动态和「凭据」页有内容，需要本机跑：
 
-- **AstrBot**：控制台在 6185，QQ 动态读它的插件历史和会话库
+- **AstrBot**：控制台在 6185，QQ 动态读它的插件历史 `history.jsonl` 和群成员表
+  `members.json`
 - **NapCat**：WebUI 在 6099，凭据页从它的 `webui.json` 读 token
 
 AstrBot 的面板账号密码放在**运行账号**（部署时的 sudo 用户）主目录下，
@@ -240,22 +247,27 @@ QQ 号和人设名都不带默认值：`DEBNAS_QQ_BOT_UIN` / `DEBNAS_QQ_OWNER` �
 <details>
 <summary>QQ 动态的数据是怎么拼出来的（实现细节）</summary>
 
-数据只读不写：
+数据只读不写，**插件日志是唯一来源**：
 
-- 插件写的 `astrbot_plugin_feiyu/history.jsonl` 提供毫秒时间
-- AstrBot 会话库 `data_v4.db` 补日志里缺的消息
+- 插件写的 `astrbot_plugin_feiyu/history.jsonl` 提供毫秒时间、发送者和图片
+- 同目录的 `members.json` 补「昵称 → QQ 号」；老记录没有 `uid` 时，再用
+  `@昵称(QQ号)` 反推一次，两头都对不上才退回首字方块
 - 她发出去的图片 / 表情包从 `journalctl` 里的 `sticker_send`、
   `send_message_to_user` 反推
 - `stickers.json` 的 `lastUsedAt` 一直当第二来源，日志漏掉的记录也能补回来
   （和日志按 180 秒去重）
+- 合并后按「会话 + 方向 + 秒 + 文本」去重，同一份消息只留一条；AstrBot 会话库
+  （`data_v4.db`）不再参与：那份数据没有真实发送时间，靠消息里的
+  `Current datetime` 往后顺延会把 20:08 的图排到 18:59
 
 图片按 md5 缓存在 `/var/lib/debnas-web/media/`（`DEBNAS_WEB_STATE` 可改），
-原图优先用 AstrBot `data/temp` 下那一份，GIF 才不会被抽成静态帧。
+表情包原图优先用插件 `media/` 或 AstrBot `data/temp` 下那一份，GIF 才不会被抽成
+静态帧。
 
 刷新是「前端 3 秒一次定时拉、服务端缓存 1 秒」（`DEBNAS_QQ_FEED_TTL` 可改），
 所以新消息 2~4 秒就上屏。为了让 3 秒一轮不烧 CPU，日志第一次读 24 小时、
-之后只读「上次位置 -2 秒」的增量；会话库只在库文件或 WAL 变过时才重新解析
-（那份有 2 MB base64 图片）。
+之后只读「上次位置 -2 秒」的增量；最多保留 400 条，群聊 / 私聊各显示最近
+40 条，前端按稳定 id 去重，刷新时不会重复追加。
 
 </details>
 
@@ -274,10 +286,16 @@ sudo ./install-mihomo.sh       # 装到 /usr/local/bin/mihomo
 
 ### API 余额（可选）
 
-右侧栏 mihomo 下面有个余额块，由后端代查 API 账户余额。它不绑死某一家：读环境变量
-和 `~/.config/*/{env,.env,env.sh}` 里所有以 `_API_KEY` 结尾的变量，按 DeepSeek →
-OpenAI → Anthropic → Moonshot → SiliconFlow → DashScope → 智谱 → Gemini → xAI
-的顺序挑一个显示；同名的 `<NAME>_BASE_URL` / `<NAME>_API_BASE` 可以指到自建代理。
+右侧栏 mihomo 下面有个「鲸鲸的零花钱」块，由后端代查 API 账户余额。它不绑死某一家：
+读环境变量和 `~/.config/*/{env,.env,env.sh}` 里所有以 `_API_KEY` 结尾的变量，按
+DeepSeek → OpenAI → Anthropic → Moonshot → SiliconFlow → DashScope → 智谱 → Gemini →
+xAI → OpenRouter 的顺序排；同名的 `<NAME>_BASE_URL` / `<NAME>_API_BASE` 可以指到自建
+代理，`<NAME>_MODEL` 在读不到 AstrBot 配置时兜底模型名。
+
+目前能查余额的：DeepSeek（`/user/balance`）、Moonshot（`/v1/users/me/balance`）、
+SiliconFlow（`/v1/user/info`）、OpenRouter（`/api/v1/credits`）。OpenAI / Anthropic /
+Gemini / xAI / 智谱没有公开余额接口，块里照样显示名字、模型、端点和密钥尾号，下面写
+「这家没有公开的余额接口」，不会硬编成某个厂商。
 
 ```bash
 install -d -m 700 ~/.config/deepseek
@@ -285,14 +303,15 @@ printf 'DEEPSEEK_API_KEY=sk-你的密钥\n' > ~/.config/deepseek/env
 chmod 600 ~/.config/deepseek/env
 ```
 
-目前只有 DeepSeek 官方（或兼容它的代理）有 `/user/balance` 余额接口，探测到别家时
-块里会如实写「这个端点没有余额接口」，不会硬编成某个厂商。
+模型名从 AstrBot 的 `cmd_config.json` 里读：先按密钥尾号匹配 `provider_sources`，
+再按 base host 匹配，最后退回 `<NAME>_MODEL`；读不到就留空。
 
 也可以写进 systemd drop-in 的 `Environment=`，但 `systemctl show` 对普通用户也能
-看到环境变量，**更推荐上面这个 0600 文件**。密钥只在服务端读，浏览器只拿到三样
-东西：厂商名、endpoint、密钥末 4 位；endpoint 是本机 / 内网地址时只显示「本机端点」
-「内网端点」，不会把内网拓扑带出去。没配或接口不通时块里直接显示原因，不影响其他
-功能。
+看到环境变量，**更推荐上面这个 0600 文件**。密钥只在服务端读，浏览器只拿到四样
+东西：厂商名、模型、endpoint、密钥末 4 位（密钥不足 12 位时只显示 `…`）；endpoint
+是本机 / 内网地址时只显示「本机端点」「内网端点」，不会把内网拓扑带出去。没配或
+接口不通时块里直接显示原因，不影响其他功能；手动刷新最多 5 秒一次，其余按
+`DEBNAS_DEEPSEEK_TTL`（默认 60 秒）缓存，失败后 15 秒重试。
 
 ## 配置参考
 
@@ -312,7 +331,6 @@ chmod 600 ~/.config/deepseek/env
 | `DEBNAS_CREDENTIALS_FILE` | `~/.config/debnas-web/credentials.json` | AstrBot 面板凭据 |
 | `DEBNAS_NAPCAT_WEBUI` | `~/Napcat/…/napcat/config/webui.json` | NapCat token 来源 |
 | `DEBNAS_QQ_HISTORY` | `~/astrbot-src/data/plugin_data/astrbot_plugin_feiyu/history.jsonl` | 插件聊天历史 |
-| `DEBNAS_ASTRBOT_DB` | `~/astrbot-src/data/data_v4.db` | AstrBot 会话库 |
 | `DEBNAS_QQ_FEED_TTL` | `1` | 服务端动态缓存秒数 |
 | `DEBNAS_QQ_BOT_UIN` | 空 | 机器人 QQ 号 |
 | `DEBNAS_QQ_OWNER` | 空 | 本人 QQ 号 |
@@ -325,6 +343,7 @@ chmod 600 ~/.config/deepseek/env
 | `DEBNAS_DEEPSEEK_TTL` | `60` | 余额缓存秒数（失败 15 秒后重试，手动刷新最少隔 5 秒） |
 | `DEEPSEEK_API_KEY` | 空 | DeepSeek 密钥；任何 `<NAME>_API_KEY` 都会被自动探测 |
 | `<NAME>_BASE_URL` | 空 | 该厂商的自建 / 代理 endpoint（也可写 `<NAME>_API_BASE`） |
+| `<NAME>_MODEL` | 空 | 余额块显示的模型名（读不到 AstrBot 配置时兜底） |
 | `DEBNAS_VM_URI` | `qemu:///system` | libvirt 连接 URI |
 | `DEBNAS_VM_IMAGES` | `/var/lib/libvirt/images` | 虚拟机镜像目录 |
 | `DEBNAS_VM_ISO_DIRS` | 空 | 额外 ISO 目录，冒号分隔 |
@@ -392,6 +411,7 @@ my-DebNAS/
 │   ├── debnas-web.service
 │   ├── pam-service
 │   └── Caddyfile.snippet
+├── VERSION                # 版本号，部署时装到 /usr/local/lib/debnas-web/VERSION
 ├── CHANGELOG.md
 ├── NOTICE
 └── LICENSE
@@ -406,8 +426,10 @@ my-DebNAS/
 **登录账号约等于这台 NAS 的管理员。** 控制台没有按用户分级：
 
 - 服务、apt、共享、用户、虚拟机按 root 执行
-- 文件页只有运行账号主目录内的写操作会降权，其他路径也按 root
-- 只有整机重启和 `root: true` 的 `/api/exec` 会检查 sudo 组
+- 文件页、下载、上传、`file_read` 都以服务进程（root）身份操作任意路径；只有运行
+  账号主目录内的写操作会降权。也就是说，任何能通过 PAM 登录的账号都能读
+  `/etc/shadow`、别人的家目录，也能往 `/etc` 写文件
+- 只有整机重启、重新部署和 `root: true` 的 `/api/exec` 会检查 sudo 组
 
 所以：不要把登录入口给不可信的人；不要直接把 80 / 443 映射到公网；
 远程访问用 VPN / Tailscale / 反代加认证。
@@ -415,7 +437,9 @@ my-DebNAS/
 其他注意：
 
 - 后端默认只监听 `127.0.0.1:8080`，HTTP 80 只对私有网段反代
-- 会话 cookie HttpOnly + SameSite=Strict，8 小时过期；除登录 / 注销外写操作要 CSRF
+- 会话 cookie HttpOnly + SameSite=Strict，8 小时过期；除登录 / 注销外写操作要 CSRF。
+  HTTP 下没有 `Secure`，密码和 cookie 会明文经过局域网
+- 登录失败只有 0.4 秒延迟，没有验证码 / 限速；不要在不可信网络暴露登录入口
 - `DEBNAS_WEB_DEV_USER` 会按 TCP 对端免登录。Caddy 反代也来自 `127.0.0.1`，
   **生产环境绝对不能设**
 - `/deploy.sh` 是公开安装器，不走登录；不想局域网可下载就删掉
@@ -425,21 +449,38 @@ my-DebNAS/
 - 「凭据」页只对已登录会话开放；AstrBot 密码从 0600 的
   `~/.config/debnas-web/credentials.json` 读，NapCat token 从 `webui.json` 读。
   页面会把明文交给任何登录账号，和上面「登录账号≈管理员」是同一个前提
-- API 余额块同理：任何登录账号都能看到余额，以及「用的是哪家 key、末 4 位、
+- API 余额块同理：任何登录账号都能看到余额，以及「用的是哪家 key、模型、末 4 位、
   endpoint」。密钥明文只在服务端用，不下发浏览器；探测范围是本机环境变量和
   `~/.config/*/{env,.env,env.sh}`，里面的 `*_API_KEY` 会读进内存但不会回传；
   endpoint 是内网地址时只显示「内网端点」。优先放 0600 文件，别写进 unit 的
   `Environment=`（`systemctl show` 可见）
-- 仓库里不带真实身份：QQ 号、人设名、局域网地址都是环境变量或示例值，默认值只有
-  中性占位
+- `install-mihomo.sh` 从 GitHub Releases 直接下载二进制，只走 HTTPS，没有校验哈希；
+  README 里的 `curl -fsSLk … | sudo bash` 为自签证书关掉了 TLS 校验。在意供应链就
+  在可信网络里先下载、看一眼再执行
+- 仓库里不带真实身份：QQ 号、群成员昵称、局域网地址都是环境变量或示例值，默认值
+  只有中性占位
 
-如果机器上还有普通 SSH 用户，建议在 `/etc/pam.d/debnas-web` 限制只允许 sudo 组登录：
+如果机器上还有普通 SSH 用户，**强烈建议**在 `/etc/pam.d/debnas-web` 限制只允许
+sudo 组登录（这是目前唯一能把「登录≈root」收窄的一层）：
 
 ```
 account  required  pam_succeed_if.so user ingroup sudo
 ```
 
 按你的 PAM 配置调整。
+
+### 2026-11 安全审查（本次）
+
+- 新增的 QQ 动态字段不带作者 QQ 号 / 人设名默认值，统一走 `DEBNAS_QQ_*`，
+  默认「机器人」「我」
+- `portal_redeploy` 不再接受客户端传入的脚本目录：原来可以指向任意目录里的
+  `deploy-web.sh` 并以 root 执行，属于本地提权；现在只跑部署时发布的 `/deploy.sh`，
+  并要求 sudo 组
+- 多厂商余额块沿用 endpoint 脱敏，不下发密钥来源路径，密钥尾号只在长度 ≥12 时
+  显示；手动刷新保持 5 秒下限
+- `VERSION` 注入 HTML 时按 JSON 转义；静态目录前缀校验补上分隔符
+- 仍然保留的设计：登录账号可借文件页 / 下载 / 上传 / 用户管理以 root 操作任意路径，
+  见本节第一条；没有用户级沙箱，也没有自动化测试
 
 ## 已知限制
 
@@ -456,13 +497,15 @@ account  required  pam_succeed_if.so user ingroup sudo
 
 **QQ 动态**
 
-- 只读 AstrBot 的插件历史（`astrbot_plugin_feiyu/history.jsonl`）和会话库
-  （`data_v4.db`），默认最近 24 小时、最多 80 条；没有时间锚点的消息会被跳过
+- 只读插件的 `history.jsonl` 和 `members.json`，默认最近 24 小时、最多 400 条；
+  群聊 / 私聊各显示最近 40 条。时间只认插件记录的毫秒值，不再从会话库推时间，
+  所以会话库里有、插件日志没记的消息不会出现
 - 她发出去的图片 / 表情包靠读 AstrBot 的 systemd 日志反推，日志取法依次试
   `--file` / `--user-unit` / `--user`，都读不到时只剩 `stickers.json` 的
   `lastUsedAt` 兜底；表情包要对得上时间点才显示，仍可能缺几条
 - 系统表情读的是本机 QQ 客户端的缓存，换 QQ 版本或清缓存会掉图
-- 会话库里的图片是发给模型的那份压缩图：原文件被清掉后退回 base64，GIF 只剩一帧
+- 群成员头像由浏览器直接向 `q1.qlogo.cn` 请求（URL 里带 QQ 号），会向腾讯暴露
+  访问者 IP；加载失败自动退回首字方块
 - AstrBot / NapCat 要自己安装并监听 6185 / 6099；凭据页只做展示，AstrBot 面板改密后
   要手动同步 `credentials.json`
 
@@ -472,8 +515,8 @@ account  required  pam_succeed_if.so user ingroup sudo
 - 磁盘扩容只扩虚拟盘，guest 内还要自己扩分区
 - 容器操作依赖运行账号的 rootless podman
 - 界面是 M3E 风格的 CSS 实现，不是 Google 官方组件库，组件细节不保证与规范逐条对齐
-- API 余额块只查 DeepSeek 系（含兼容它的代理）的 `/user/balance`，别家只说明
-  「没有余额接口」；不做充值和用量明细
+- API 余额块只显示余额，不做充值和用量明细；能查余额的只有 DeepSeek / Moonshot /
+  SiliconFlow / OpenRouter，别家只显示厂商与模型
 - 不包含 RAID 编排、相册、影音套件、Portainer 替代
 
 ## 开发与排错
@@ -498,9 +541,12 @@ bash -n deploy-web.sh install-deps.sh install-mihomo.sh add-http-alias.sh
 | 虚拟机未就绪 | `systemctl status libvirtd` |
 | mihomo API 不可达 | `/etc/mihomo/config.yaml` 的 `external-controller` / `secret` |
 | 凭据页显示「（未配置）」 | `~/.config/debnas-web/credentials.json` 是否存在、0600 |
-| 左侧 QQ 动态空白 | AstrBot 是否在跑，`history.jsonl` / `data_v4.db` 是否有新记录 |
-| 动态里有消息但没图 | `data/temp` 里的原图是否还在，`/var/lib/debnas-web/media/` 是否可写 |
+| 左侧 QQ 动态空白 | AstrBot 是否在跑，`history.jsonl` 是否有新记录 |
+| 动态里有消息但没图 | 插件 `media/` 或 `data/temp` 里的原图是否还在，`/var/lib/debnas-web/media/` 是否可写 |
+| 群成员头像不显示 | `members.json` 里有没有这个昵称，`q1.qlogo.cn` 是否可达 |
 | 她发的表情包 / 图片不出现 | `journalctl --user-unit astrbot.service` / `journalctl --user -u astrbot` 能不能读到 |
+| 余额块显示「这家没有公开的余额接口」 | 该厂商不在 DeepSeek / Moonshot / SiliconFlow / OpenRouter 里，key 和 endpoint 是否识别对 |
+| 版本显示 `unknown` | `VERSION` 是否随部署装到 `/usr/local/lib/debnas-web/VERSION` |
 | 改了环境变量没生效 | 是否用了 drop-in，`systemctl show debnas-web -p Environment` |
 
 日志：

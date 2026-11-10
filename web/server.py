@@ -33,7 +33,6 @@ import shlex
 import shutil
 import signal
 import socket
-import sqlite3
 import string
 import struct
 import subprocess
@@ -249,6 +248,18 @@ def is_safe_name(p: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9._@-]{1,100}", p or ""))
 
 
+def app_version() -> str:
+    """读 APP_DIR/VERSION；部署后就是本仓库的版本号，读不到给 unknown。"""
+    # 部署后 VERSION 就摆在 server.py 旁边；在仓库里直接跑时它在上一级
+    for base in (APP_DIR, os.path.dirname(APP_DIR)):
+        try:
+            with open(os.path.join(base, "VERSION"), encoding="utf-8") as f:
+                return f.read().strip() or "unknown"
+        except OSError:
+            continue
+    return "unknown"
+
+
 def rpc_info(_):
     # hostname / uname / uptime / df 都可以直接读内核和 statvfs，别再 fork 四个子进程
     uname = os.uname()
@@ -274,8 +285,10 @@ def rpc_info(_):
         used = int((st.f_blocks - st.f_bfree) * unit)
     except Exception:
         total = free = used = 0
+    version = app_version()
     return {
         "host": uname.nodename, "kernel": uname.release, "uptime": uptime,
+        "version": version,
         "memTotal": mem.get("MemTotal", 0), "memAvailable": mem.get("MemAvailable", 0),
         "swapTotal": mem.get("SwapTotal", 0), "swapFree": mem.get("SwapFree", 0),
         "diskTotal": total, "diskUsed": used, "diskFree": free,
@@ -459,7 +472,7 @@ def rpc_apps(_):
                 continue
             seen.add(port)
             entries.append({"name": name, "port": port, "code": "000", "title": ""})
-    # 迁移后的宿主进程：AstrBot 控制台 / NapCat 面板
+    # 迁移后的机器人宿主进程：AstrBot 控制台 / NapCat 面板
     for name, port in (("astrbot", 6185), ("napcat", 6099)):
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.4):
@@ -540,16 +553,6 @@ def _astrbot_history_path():
         home = os.path.expanduser("~")
     return os.path.join(home, "astrbot-src", "data", "plugin_data",
                         "astrbot_plugin_feiyu", "history.jsonl")
-
-
-def _astrbot_db_path():
-    user = os.environ.get("DEBNAS_WEB_RUN_AS")
-    try:
-        home = pwd.getpwnam(user).pw_dir if user else os.path.expanduser("~")
-    except KeyError:
-        home = os.path.expanduser("~")
-    return os.environ.get("DEBNAS_ASTRBOT_DB",
-                          os.path.join(home, "astrbot-src", "data", "data_v4.db"))
 
 
 def _astrbot_media_dir():
@@ -959,9 +962,14 @@ def _sent_sticker_feed():
         out.append({
             "ts": send["ts"],
             "time": time.strftime("%H:%M:%S", time.localtime(send["ts"])),
+            # date / who 必须带上：前端按 date 切「今天 / 昨天」分组，
+            # 缺了会在这条表情包前面插一个「最近」分组，看着像顺序乱了。
+            "date": time.strftime("%Y-%m-%d", time.localtime(send["ts"])),
             "chat": send["chat"],
             "dir": "out",
             "name": _qq_name("bot"),
+            "who": _qq_name("bot"),
+            "uin": os.environ.get("DEBNAS_QQ_BOT_UIN", ""),
             "text": "[图片]",
             "media": [{"kind": "image", "file": name}],
         })
@@ -990,6 +998,8 @@ def _clean_feed_text(text):
     text = re.sub(r"\[Image from tool [^\]\n]*\]?", "", text)
     # 纯图片消息在模型侧会带一条附件说明，控制台只需要 [图片] 这个占位
     text = re.sub(r"\[Image Attachment[^\]\n]*\]?", "", text)
+    # 插件按 QQ 号给主人消息加的标记，控制台里不用重复显示
+    text = re.sub(r"^\s*【管理员】\s*", "", text)
     m = re.search(r"\[File Attachment: name ([^,\]]+)", text)
     if m:
         text = "[文件] " + m.group(1).strip()
@@ -997,6 +1007,9 @@ def _clean_feed_text(text):
     if text.startswith("【%s的" % _qq_name("bot")) or text.startswith("【系统"):
         return ""
     return text
+
+
+_MENTION_RE = re.compile(r"@([^@()]{1,24}?)\((\d{5,12})\)")
 
 
 def _astrbot_feed():
@@ -1008,7 +1021,8 @@ def _astrbot_feed():
         return []
     now = time.time()
     bot_uin = os.environ.get("DEBNAS_QQ_BOT_UIN", "")
-    items = []
+    owner = os.environ.get("DEBNAS_QQ_OWNER", "")
+    items, name_uin = [], {}
     for line in lines:
         try:
             rec = json.loads(line)
@@ -1022,10 +1036,11 @@ def _astrbot_feed():
         text = str(rec.get("text") or "").strip()
         if not text:
             continue
+        for mm in _MENTION_RE.finditer(text):
+            name_uin.setdefault(mm.group(1).strip(), mm.group(2))
         chat = str(rec.get("chat") or "")
         kind, _, peer = chat.partition(":")
         out = rec.get("role") == "me"
-        owner = os.environ.get("DEBNAS_QQ_OWNER", "")
         who = _qq_name("bot") if out else (
             _qq_name("owner") if kind == "private" and owner and peer == owner else
             (str(rec.get("name") or peer or "QQ")))
@@ -1036,199 +1051,79 @@ def _astrbot_feed():
             "dir": "out" if out else "in",
             "scope": "群聊" if kind == "group" else "私聊",
             "who": who,
-            "uin": bot_uin if out else (peer if kind == "private" else ""),
+            "uin": bot_uin if out else str(rec.get("uid") or (peer if kind == "private" else "")),
             "mid": "",
             "chat": chat,
             "text": text[:240],
             "media": [m for m in (rec.get("media") or [])
                       if isinstance(m, dict) and m.get("file")],
         })
-    return items[-80:]
-
-
-_DB_FEED = {"key": None, "at": 0.0, "items": []}
-
-
-def _astrbot_db_feed():
-    """从 AstrBot 的 conversations 表还原真实对话（含今天的会话）。
-
-    这份内容有 2MB 左右（里面是 base64 图片），解析一次 15~20ms，
-    所以按「库文件 + WAL 的 mtime/大小」缓存 5 秒，没写库就直接复用。
-    """
-    path = _astrbot_db_path()
-    if not os.path.exists(path):
-        return []
+    # 插件会定时嗅探群成员名单（members.json），这是最全的一张「名字 → QQ 号」表
     try:
-        st = os.stat(path)
-        try:
-            wal = os.stat(path + "-wal")
-            wal_key = (wal.st_mtime_ns, wal.st_size)
-        except OSError:
-            # 刚 checkpoint 过就没有 WAL，库文件本身的 mtime/大小照样能当缓存键
-            wal_key = (0, 0)
-        key = (st.st_mtime_ns, st.st_size) + wal_key
-    except OSError:
-        key = None
-    if key and _DB_FEED["key"] == key and time.time() - _DB_FEED["at"] < 5:
-        return list(_DB_FEED["items"])
-    try:
-        conn = sqlite3.connect("file:" + path + "?mode=ro", uri=True, timeout=2)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "select user_id, content, updated_at from conversations "
-            "where platform_id = 'napcat' order by updated_at desc limit 30"
-        ).fetchall()
-        conn.close()
-    except sqlite3.Error:
-        return []
-    now = time.time()
-    bot_uin = os.environ.get("DEBNAS_QQ_BOT_UIN", "")
-    items = []
-    for row in rows:
-        umo = str(row["user_id"] or "")
-        parts = umo.split(":")
-        kind = parts[1] if len(parts) > 1 else ""
-        peer = parts[2] if len(parts) > 2 else ""
-        is_group = "Group" in kind
-        chat = ("group:" if is_group else "private:") + peer
-        try:
-            content = json.loads(row["content"] or "[]")
-        except Exception:
-            continue
-        if not isinstance(content, list):
-            continue
-        last_ts = 0.0
-        for msg in content:
-            if not isinstance(msg, dict):
-                continue
-            role = str(msg.get("role") or "")
-            if role not in ("user", "assistant"):
-                continue
-            texts, images, attachments, reminder = [], [], [], None
-            for part in msg.get("content") or []:
-                if not isinstance(part, dict):
-                    continue
-                if part.get("type") == "image_url":
-                    url = str((part.get("image_url") or {}).get("url") or "")
-                    if url:
-                        images.append(url)
-                    continue
-                if part.get("type") != "text":
-                    continue
-                txt = str(part.get("text") or "")
-                m = re.search(r"Current datetime:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})", txt)
-                if m:
-                    try:
-                        reminder = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M").timestamp()
-                    except Exception:
-                        pass
-                    continue
-                for path in re.findall(r"\[Image Attachment: original path ([^;\]]+)", txt):
-                    attachments.append(path.strip())
-                if txt.strip():
-                    texts.append(txt.strip())
-            text = "\n".join(texts).strip()
-            # 工具产出的图片（B 站抽帧之类）只是内部上下文，不算聊天图片；
-            # 引用消息里的图是对方那条带的，别算成这条消息发出来的图
-            if "[Image from tool" in text or "<Quoted Message>" in text:
-                images = []
-                attachments = []
-            if not text and not images:
-                continue
-            # 时间只认用户消息里 <system_reminder> 的分钟级时间；助手回复顺着往后排。
-            # 没有锚点的消息直接跳过：拿会话的 updated_at 顶替会把整段历史顶到
-            # 最后一条消息的时间上（列表里就会看到一串「未来时间」）。
-            base = reminder if reminder is not None else last_ts
-            if not base:
-                continue
-            ts = base if base > last_ts else last_ts + 1
-            last_ts = ts
-            if now - ts > 24 * 3600:
-                continue
-            media = []
-            # 先试 data/temp 里的原图（GIF 保留动画），没有再退回会话库的 base64
-            for path in attachments[:4]:
-                name = _cache_local_image(path)
-                if name:
-                    media.append({"kind": "image", "file": name})
-            if not media:
-                for url in images[:4]:
-                    name = _cache_received_image(url)
-                    if name:
-                        media.append({"kind": "image", "file": name})
-            if not text and media:
-                text = "[图片]"
-            if not text:
-                continue
-            out = role == "assistant"
-            owner = os.environ.get("DEBNAS_QQ_OWNER", "")
-            who = (_qq_name("bot") if out else
-                   (_qq_name("owner") if (not is_group and owner and peer == owner) else
-                    ("群聊" if is_group else "私聊")))
-            items.append({
-                "time": time.strftime("%H:%M:%S", time.localtime(ts)),
-                "ts": int(ts),
-                "date": time.strftime("%Y-%m-%d", time.localtime(ts)),
-                "dir": "out" if out else "in",
-                "scope": "群聊" if is_group else "私聊",
-                "who": who,
-                "uin": bot_uin if out else (peer if not is_group else ""),
-                "mid": "",
-                "chat": chat,
-                "text": text[:240],
-                "media": media,
-            })
-    items.sort(key=lambda x: x["ts"])
-    items = items[-80:]
-    if key:
-        _DB_FEED.update(key=key, at=time.time(), items=items)
-    return items
+        with open(os.path.join(os.path.dirname(_astrbot_history_path()), "members.json"),
+                  encoding="utf-8") as f:
+            for group in json.load(f).values():
+                if isinstance(group, dict):
+                    for name, uid in group.items():
+                        if name and uid:
+                            name_uin.setdefault(str(name), str(uid))
+    except (OSError, ValueError):
+        pass
+    # 老记录没有 uid（插件是 20:5x 才开始记的），再用 @昵称(QQ号) 兜一层；
+    # 没配 DEBNAS_QQ_OWNER / DEBNAS_QQ_BOT_UIN 时不建立「名字 → 空号」的映射
+    if owner:
+        name_uin.setdefault(_qq_name("owner"), owner)
+    if bot_uin:
+        name_uin.setdefault(_qq_name("bot"), bot_uin)
+    for it in items:
+        if not it.get("uin"):
+            it["uin"] = name_uin.get(it.get("who"), "")
+    # 多取一些：群聊/私聊分开后，80 条混排会被另一条流挤掉大半，
+    # 前端再按会话各取 40 条，这里留足余量
+    return items[-400:]
 
 
 def _astrbot_live_feed():
-    """插件实时日志 + 会话库合并去重；没有新数据就返回空。"""
-    hist = _astrbot_feed()
-    db = _astrbot_db_feed()
-    if not hist and not db:
-        return []
-    # 插件日志的时间是毫秒级真值，会话库只有分钟级的 system_reminder。
-    # 所以先收日志，再拿会话库补缺：同一段聊天里能对上（谁 + 方向 + 文本 +
-    # 三分钟内）的就并进日志那条，时间用日志的，图片也补上。
-    by_key, out = {}, []
-    for it in hist:
+    """插件日志是唯一数据源：毫秒级真实时间，图片由插件落盘记录。
+
+    这里曾经还合并过 AstrBot 的会话库，但那份数据没有真实发送时间——时间是
+    拿消息里的 `Current datetime` 锚点往后一秒一秒顺延推出来的，推歪了会把
+    20:08 发的图排到 18:59。整个数据源已删除：宁可少几条历史，也不要假时间。
+
+    Returns:
+        按时间升序的消息列表，最多 400 条。
+    """
+    out = []
+    for it in _astrbot_feed():
         text = _clean_feed_text(it.get("text", ""))
         if not text:
             continue
         it["text"] = text[:240]
-        by_key.setdefault((it.get("chat", ""), it.get("dir"), text[:80]), []).append(it)
         out.append(it)
-    used = set()
-    for it in db:
-        text = _clean_feed_text(it.get("text", ""))
-        if not text:
-            continue
-        it["text"] = text[:240]
-        key = (it.get("chat", ""), it.get("dir"), text[:80])
-        twin = None
-        for cand in by_key.get(key, []):
-            if id(cand) in used or abs(cand["ts"] - it["ts"]) > 180:
-                continue
-            twin = cand
-            break
-        if twin is not None:
-            used.add(id(twin))
-            if it.get("media") and not twin.get("media"):
-                twin["media"] = it["media"]
-            continue
-        out.append(it)
-    # 她发出去的表情包：插件不记，debnas 从 AstrBot 日志里自己找。
+    # 她发出去的表情包：插件只记文本，debnas 从 AstrBot 日志里自己找。
     for it in _sent_sticker_feed():
         twin = next((c for c in out if c.get("chat") == it["chat"] and c.get("dir") == "out"
                      and c.get("text") == "[图片]" and abs(c["ts"] - it["ts"]) <= 180), None)
         if twin is None:
             out.append(it)
     out.sort(key=lambda x: x["ts"])
-    return out[-80:]
+    # 同一份消息只留一条：同会话 + 同方向 + 同秒 + 同文本，重复的直接丢掉
+    uniq, seen = [], set()
+    for it in out:
+        key = (it.get("chat"), it.get("dir"), int(it["ts"]), (it.get("text") or "")[:80])
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(it)
+    out = uniq
+    for it in out:
+        it["hm"] = time.strftime("%H:%M", time.localtime(it["ts"]))
+        # 稳定 id：内容一样就是同一条，前端刷新时不会重复追加
+        it["id"] = "|".join([str(it.get("chat", "")), str(it.get("dir", "")),
+                             str(int(it["ts"])), (it.get("text") or "")[:40]])
+        if not it.get("scope"):
+            it["scope"] = "群聊" if str(it.get("chat", "")).startswith("group:") else "私聊"
+    return out[-400:]
 
 
 def rpc_qq(_):
@@ -1412,6 +1307,75 @@ DS_BALANCE_TTL = float(os.environ.get("DEBNAS_DEEPSEEK_TTL", "60"))
 # 即使点「刷新」也至少隔 5 秒，避免把第三方额度和接口 QPS 浪费在连点上
 DS_FORCE_MIN = 5.0
 
+# 没配 base url 时按前缀猜端点；没列进来的厂商只能靠 *_BASE_URL
+_API_DEFAULTS = {
+    "DEEPSEEK": "https://api.deepseek.com",
+    "MOONSHOT": "https://api.moonshot.cn",
+    "SILICONFLOW": "https://api.siliconflow.cn",
+    "OPENROUTER": "https://openrouter.ai",
+}
+
+
+def _bal_deepseek(payload):
+    items = []
+    for it in payload.get("balance_infos") or []:
+        if isinstance(it, dict):
+            items.append({
+                "currency": str(it.get("currency") or ""),
+                "total": str(it.get("total_balance") or ""),
+                "granted": str(it.get("granted_balance") or ""),
+                "topped": str(it.get("topped_up_balance") or ""),
+            })
+    return items, bool(payload.get("is_available"))
+
+
+def _bal_moonshot(payload):
+    d = payload.get("data") or {}
+    if not isinstance(d, dict) or "available_balance" not in d:
+        return [], False
+    return [{
+        "currency": "CNY",
+        "total": str(d.get("available_balance") or ""),
+        "granted": str(d.get("voucher_balance") or ""),
+        "topped": str(d.get("cash_balance") or ""),
+    }], True
+
+
+def _bal_siliconflow(payload):
+    d = payload.get("data") or {}
+    if not isinstance(d, dict) or "totalBalance" not in d:
+        return [], False
+    return [{
+        "currency": "CNY",
+        "total": str(d.get("totalBalance") or ""),
+        "granted": str(d.get("balance") or ""),
+        "topped": str(d.get("chargeBalance") or ""),
+    }], True
+
+
+def _bal_openrouter(payload):
+    d = payload.get("data") or {}
+    try:
+        credits = float(d.get("total_credits") or 0)
+        usage = float(d.get("total_usage") or 0)
+    except (TypeError, ValueError):
+        return [], False
+    return [{
+        "currency": "USD",
+        "total": "%.4f" % (credits - usage),
+        "granted": "0",
+        "topped": "%.4f" % credits,
+    }], True
+
+
+# 前缀 → (余额路径, 解析函数)。没在这张表里的厂商就是「没有公开余额接口」
+_API_BALANCE = {
+    "DEEPSEEK": ("/user/balance", _bal_deepseek),
+    "MOONSHOT": ("/v1/users/me/balance", _bal_moonshot),
+    "SILICONFLOW": ("/v1/user/info", _bal_siliconflow),
+    "OPENROUTER": ("/api/v1/credits", _bal_openrouter),
+}
+
 
 _API_PROVIDERS = {
     "DEEPSEEK": "DeepSeek",
@@ -1423,10 +1387,11 @@ _API_PROVIDERS = {
     "ZHIPU": "智谱",
     "GEMINI": "Gemini",
     "XAI": "xAI",
+    "OPENROUTER": "OpenRouter",
 }
 # 同时找到多个时，按这个顺序挑一个来显示
 _API_PRIORITY = ["DEEPSEEK", "OPENAI", "ANTHROPIC", "MOONSHOT", "SILICONFLOW",
-                 "DASHSCOPE", "ZHIPU", "GEMINI", "XAI"]
+                 "DASHSCOPE", "ZHIPU", "GEMINI", "XAI", "OPENROUTER"]
 
 
 def _read_env_file(path):
@@ -1501,10 +1466,8 @@ def _api_endpoint(cand):
         base = cand["base"].rstrip("/")
         if not base.startswith(("http://", "https://")):
             base = "https://" + base
-    elif cand["prefix"] == "DEEPSEEK":
-        base = "https://api.deepseek.com"
     else:
-        base = ""
+        base = _API_DEFAULTS.get(cand["prefix"], "")
     return base
 
 
@@ -1552,8 +1515,94 @@ def _api_summary(cand):
     }
 
 
+def _astrbot_models():
+    """从 AstrBot 的 cmd_config.json 里读「哪把钥匙配了哪个模型」。
+
+    返回列表，每项形如 `{"keys": [...], "base": "...", "models": [...]}`。
+    读不到就返回空列表，模型那一栏留空，不影响查余额。
+    """
+    path = os.path.join(_qq_home(), "astrbot-src", "data", "cmd_config.json")
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return []
+    sources = {}
+    for src in cfg.get("provider_sources") or []:
+        if not isinstance(src, dict):
+            continue
+        key = src.get("key")
+        if isinstance(key, list):
+            key = key[0] if key else ""
+        sources[src.get("id")] = {"base": str(src.get("api_base") or ""),
+                                  "keys": [str(key)] if key else []}
+    out = []
+    for prov in cfg.get("provider") or []:
+        if not isinstance(prov, dict) or not prov.get("enable", True):
+            continue
+        model = str(prov.get("model") or "")
+        if not model:
+            continue
+        src = sources.get(prov.get("provider_source_id")) or {}
+        out.append({"base": src.get("base", ""), "keys": src.get("keys", []), "models": [model]})
+    return out
+
+
+def _model_for(cand, models):
+    """挑出这把密钥对应的模型名：先按密钥尾号对，再按 base host 对，最后看环境变量。"""
+    tail = cand["key"][-4:]
+    for entry in models:
+        if any(k and k.endswith(tail) for k in entry["keys"]):
+            return ", ".join(dict.fromkeys(entry["models"]))
+    host = urllib.parse.urlparse(_api_endpoint(cand)).netloc
+    if host:
+        for entry in models:
+            if host and host in entry["base"]:
+                return ", ".join(dict.fromkeys(entry["models"]))
+    return os.environ.get(cand["prefix"] + "_MODEL", "")
+
+
+def _provider_balance(cand, models):
+    """查一家厂商的余额；查不了就把原因写进 error，前端照样能看到是谁、什么模型。"""
+    summary = _api_summary(cand) or {}
+    item = {
+        "prefix": cand["prefix"],
+        "name": summary.get("name") or cand["name"],
+        "endpoint": summary.get("endpoint") or "",
+        "key": summary.get("key") or "",
+        "model": _model_for(cand, models),
+        "ok": False, "available": False, "items": [], "error": "",
+    }
+    base = _api_endpoint(cand)
+    if not base:
+        item["error"] = "没配 base url，认不出是哪家的端点"
+        return item
+    spec = _API_BALANCE.get(cand["prefix"])
+    if not spec:
+        item["error"] = "这家没有公开的余额接口"
+        return item
+    path, parse = spec
+    try:
+        req = urllib.request.Request(base.rstrip("/") + path, headers={
+            "Authorization": "Bearer " + cand["key"],
+            "Accept": "application/json",
+            "User-Agent": "debnas-web",
+        })
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8", "replace"))
+        items, available = parse(payload)
+        item.update(ok=True, available=available, items=items)
+        if not items:
+            item["error"] = "接口没有返回余额"
+    except urllib.error.HTTPError as exc:
+        item["error"] = "接口返回 %d" % exc.code
+    except Exception:  # noqa: BLE001
+        item["error"] = "请求 " + (summary.get("endpoint") or "接口") + " 失败"
+    return item
+
+
 def rpc_deepseek(params):
-    """查余额：自动探测用的是哪家 API，只有 DeepSeek 官方（或兼容它的代理）有余额接口。"""
+    """查余额：把探测到的每家都过一遍，能查的查，查不了的标「没有公开余额接口」。"""
     now = time.time()
     cached = DS_BALANCE["data"]
     ttl = DS_BALANCE_TTL if cached and cached.get("ok") else min(DS_BALANCE_TTL, 15.0)
@@ -1562,46 +1611,22 @@ def rpc_deepseek(params):
     if cached is not None and now - DS_BALANCE["at"] < floor:
         return cached
 
-    cand = (_api_candidates() or [None])[0]
-    provider = _api_summary(cand)
-    if not cand:
-        data = {"ok": False, "provider": None,
-                "error": "没找到 API 密钥（环境变量或 ~/.config/*/env 里的 *_API_KEY）"}
-    elif "deepseek" not in _api_endpoint(cand):
-        data = {"ok": False, "provider": provider,
-                "error": "探测到 " + provider["name"] + " @ " + provider["endpoint"] +
-                         "，这个端点没有 /user/balance 余额接口"}
-    else:
-        url = _api_endpoint(cand) + "/user/balance"
-        try:
-            req = urllib.request.Request(url, headers={
-                "Authorization": "Bearer " + cand["key"],
-                "Accept": "application/json",
-                "User-Agent": "debnas-web",
-            })
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                payload = json.loads(resp.read().decode("utf-8", "replace"))
-            items = []
-            for it in payload.get("balance_infos") or []:
-                if not isinstance(it, dict):
-                    continue
-                items.append({
-                    "currency": str(it.get("currency") or ""),
-                    "total": str(it.get("total_balance") or ""),
-                    "granted": str(it.get("granted_balance") or ""),
-                    "topped": str(it.get("topped_up_balance") or ""),
-                })
-            data = {
-                "ok": True,
-                "available": bool(payload.get("is_available")),
-                "items": items,
-                "at": int(now),
-                "provider": provider,
-            }
-        except urllib.error.HTTPError as exc:
-            data = {"ok": False, "provider": provider, "error": "接口返回 %d" % exc.code}
-        except Exception:  # noqa: BLE001
-            data = {"ok": False, "provider": provider, "error": "请求 " + (provider or {}).get("endpoint", "接口") + " 失败"}
+    cands = _api_candidates() or []
+    models = _astrbot_models()
+    providers = [_provider_balance(c, models) for c in cands]
+    first = providers[0] if providers else None
+    data = {
+        "ok": any(p["ok"] for p in providers),
+        "providers": providers,
+        "at": int(now),
+        "provider": (_api_summary(cands[0]) if cands else None),
+        "items": (first or {}).get("items") or [],
+        "available": bool((first or {}).get("available")),
+    }
+    if not providers:
+        data["error"] = "没找到 API 密钥（环境变量或 ~/.config/*/env 里的 *_API_KEY）"
+    elif not data["ok"]:
+        data["error"] = first.get("error") or "余额查询失败"
     DS_BALANCE.update(at=now, data=data)
     return data
 
@@ -2972,14 +2997,15 @@ def rpc_upload_abort(params):
     return {"ok": True}
 
 
-def rpc_portal_redeploy(params):
-    source = str(params.get("source") or "").strip()
+def rpc_portal_redeploy(_):
+    """只跑部署时发布的那份 /deploy.sh。
+
+    以前允许客户端传 `source`，指向任意目录里的 `deploy-web.sh` 再以 root 执行，
+    等于给了登录用户一个本地提权口子；现在固定脚本路径，且由 api_rpc 校验 sudo 组。
+    """
     script = os.path.join(STATIC_DIR, "deploy.sh")
-    if not os.path.isfile(script) and source:
-        cand = os.path.join(source, "deploy-web.sh")
-        script = cand if os.path.isfile(cand) else script
     if not os.path.isfile(script):
-        raise ValueError("找不到部署脚本")
+        raise ValueError("找不到部署脚本（先跑一次 deploy-web.sh 发布 /deploy.sh）")
     unit = "debnas-redeploy-%d" % int(time.time())
     r = run(as_root(["systemd-run", "--quiet", "--collect", "--unit", unit,
                      "--on-active=3", "/bin/bash", script, "--skip-deps"]), timeout=15)
@@ -4220,7 +4246,7 @@ class Handler(BaseHTTPRequestHandler):
 
         data = self.read_json()
         method = str(data.get("method", ""))
-        if method == "reboot" and not sess.get("sudoer"):
+        if method in ("reboot", "portal_redeploy") and not sess.get("sudoer"):
             return self.send_json({"error": "当前账号没有 sudo 权限"}, 403)
         fn = RPC.get(method)
         if not fn:
@@ -4385,8 +4411,10 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", ""):
             path = "/index.html"
         rel = os.path.normpath(path).lstrip("/")
-        full = os.path.join(STATIC_DIR, rel)
-        if not os.path.abspath(full).startswith(os.path.abspath(STATIC_DIR)):
+        root = os.path.abspath(STATIC_DIR)
+        full = os.path.abspath(os.path.join(root, rel))
+        # 必须是 root 本身或其子路径；只比字符串前缀会把 /…/static-evil 也放进来
+        if full != root and not full.startswith(root + os.sep):
             return self.send_json({"error": "forbidden"}, 403)
         if not os.path.isfile(full):
             return self.send_json({"error": "not found"}, 404)
@@ -4408,12 +4436,15 @@ class Handler(BaseHTTPRequestHandler):
 
         # 字体/图片体积大且基本不随部署变化：让浏览器缓存 7 天；CSS/JS 每次用 ETag 校验，
         # 命中就 304，不再整套重下（以前是 no-cache 且没有校验器，只能全量重传）。
-        cache = "public, max-age=604800" if ext in (
-            ".woff", ".woff2", ".ttf", ".png", ".svg", ".ico") else "no-cache"
+        cache = "no-store" if ext == ".html" else (
+            "public, max-age=604800" if ext in (
+                ".woff", ".woff2", ".ttf", ".png", ".svg", ".ico") else "no-cache")
         st = os.stat(full)
-        etag = '"%x-%x"' % (int(st.st_mtime), st.st_size)
+        # HTML 的正文里嵌了 CSS/JS 的文件指纹，指纹变了正文就该变；所以 HTML 不参与
+        # 304，否则 app.js 换了、index.html 没换，浏览器会拿着旧 HTML 里的旧 URL。
+        etag = "" if ext == ".html" else '"%x-%x"' % (int(st.st_mtime), st.st_size)
         inm = self.headers.get("If-None-Match") or ""
-        if etag in [t.strip() for t in inm.split(",")]:
+        if etag and etag in [t.strip() for t in inm.split(",")]:
             self.send_response(304)
             self.send_header("ETag", etag)
             self.send_header("Cache-Control", cache)
@@ -4422,6 +4453,22 @@ class Handler(BaseHTTPRequestHandler):
 
         with open(full, "rb") as f:
             body = f.read()
+        if ext == ".html":
+            # HTML 是 no-store，每次都会重新取；在它里面给 CSS/JS 打上文件指纹，
+            # 部署一改 URL 就变，浏览器不可能再拿旧脚本跑出旧界面。
+            # VERSION 是本地文件，但按 JSON 字符串转义后再进 HTML：内容里要是出现
+            # 引号 / 换行 / `</script>` 也不会把这段脚本提前截断
+            build = json.dumps(str(app_version())).replace("<", "\\u003c")
+            body = body.replace(
+                b"<head>",
+                ("<head><script>window.__DEBNAS_BUILD=%s;</script>" % build).encode(),
+                1)
+            for asset in ("app.js", "styles.css", "theme.js", "fonts.css"):
+                try:
+                    ver = int(os.path.getmtime(os.path.join(STATIC_DIR, asset)))
+                except OSError:
+                    continue
+                body = body.replace(("./" + asset).encode(), ("./%s?v=%d" % (asset, ver)).encode())
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))

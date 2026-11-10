@@ -52,6 +52,7 @@ fi
 echo "==> 1/5 后端与静态资源"
 install -d -m 0755 "$WEB" "$STATIC" "$STATIC/fonts" "$STATIC/icons" "$STATE" "$LIB"
 install -m 0755 "$HERE/web/server.py" "$WEB/server.py"
+install -m 0644 "$HERE/VERSION" "$WEB/VERSION"
 install -m 0644 "$HERE/web/login.html" "$HERE/web/status.html" "$HERE/web/index.html" \
   "$HERE/web/api-web.js" "$HERE/web/cockpit-shim.js" \
   "$HERE/web/console.html" "$HERE/web/console.css" "$HERE/web/console.js" "$STATIC/"

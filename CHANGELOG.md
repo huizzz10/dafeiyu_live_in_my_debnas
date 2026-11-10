@@ -1,24 +1,202 @@
 # 变更记录
 
-## 2026-11-10（API 余额块：自动探测用哪家 key）
+## 2026-11-10（版本基线 0.1.0）
 
-- 右侧栏 mihomo 块下面新增余额块：显示余额、充值 / 赠送明细和更新时间，每 60 秒
-  自动刷新，也可以点「刷新」立即查；点右上角箭头收起，状态记在 `localStorage`
-- 不绑死 DeepSeek：扫环境变量和 `~/.config/*/{env,.env,env.sh}` 里所有 `*_API_KEY`，
-  按 DeepSeek → OpenAI → Anthropic → … 的优先级挑一个，配合 `<NAME>_BASE_URL` /
-  `<NAME>_API_BASE` 认自建 / 代理 endpoint，块标题直接用探测到的名字
-- 目前只有 DeepSeek 系有 `/user/balance`，探测到别家只说明「没有余额接口」，
-  不硬编成某个厂商；服务端缓存 60 秒（失败 15 秒后重试），「刷新」最少隔 5 秒，
-  避免连点把第三方接口刷爆
+仓库原来没有版本号，`/usr/share/cockpit/debnas-portal/VERSION` 那是旧 Cockpit
+插件留下的，跟这边没关系。现在建立自己的基线：
+
+- 新增 `VERSION`，从 `0.1.0` 起；`deploy-web.sh` 会把它装到
+  `/usr/local/lib/debnas-web/VERSION`
+- `rpc_info()` 多返回一个 `version`，右侧「系统」块显示成
+  `内核 7.2.12+deb13-amd64 · DebNAS 0.1.0`
+- 读不到文件就返回 `unknown`，页面不会显示 `DebNAS unknown`
+- 余额块的标题从服务商名 `DeepSeek` 改成 **「鲸鲸的零花钱」**（`DS_TITLE` 常量），
+  服务商 / 端点 / 密钥仍显示在下面的探测行，不影响判断走的是哪家
+- 余额块**多厂商适配**，并且**每家都标注模型**：
+  - 后端 `_API_BALANCE` 表按前缀分派，目前能查余额的：DeepSeek（`/user/balance`）、
+    Moonshot（`/v1/users/me/balance`）、SiliconFlow（`/v1/user/info`）、
+    OpenRouter（`/api/v1/credits`）
+  - 没有公开余额接口的（OpenAI / Anthropic / Gemini / xAI / 智谱）不再直接报错，
+    而是照样显示名字、模型、端点、密钥尾号，下面写「这家没有公开的余额接口」
+  - 模型名从 AstrBot 的 `cmd_config.json` 里读：先按密钥尾号匹配 `provider_sources`，
+    再按 base host 匹配，最后看环境变量 `<厂商>_MODEL`；读不到就留空
+  - `rpc_deepseek` 现在返回 `providers[]`，每项含 `name/model/endpoint/key/items/available/error`，
+    顶层 `provider/items/available/ok` 保留，老前端不会炸
+  - 前端每家一块：`名字 [模型] —— 余额`，下面一行「充值 / 赠送」，再下面是端点和密钥尾号
+- 「系统信息」里的**界面版本**以前永远显示 `dev`：`window.__DEBNAS_BUILD` 全仓库
+  没有任何地方给它赋过值，`esc(... || "dev")` 就一路退到兜底。现在 `serve_static()`
+  在 `index.html` 的 `<head>` 里注入 `window.__DEBNAS_BUILD="0.1.0"`，前端再拿
+  `info.version` 兜一层，彻底不会出现 `dev`
+
+### 安全与隐私（同批修复）
+
+- 新增的 QQ 动态字段不再带作者 QQ 号 / 人设名默认值，统一走
+  `DEBNAS_QQ_BOT_UIN` / `DEBNAS_QQ_OWNER` / `DEBNAS_QQ_BOT_NAME` /
+  `DEBNAS_QQ_OWNER_NAME`（默认「机器人」「我」）；顺手把 `owner` 的读取挪出循环，
+  历史日志全无效时不会 NameError
+- `rpc_portal_redeploy` 删掉客户端可传的 `source` 参数：原来能指向任意目录里的
+  `deploy-web.sh` 再以 root 执行，属于本地提权；现在只跑部署时发布的 `/deploy.sh`，
+  并要求会话属于 sudo 组
+- 多厂商余额块沿用 endpoint 脱敏，不下发密钥来源文件路径，密钥尾号只在长度 ≥12
+  时显示；手动刷新保持 5 秒下限
+- `serve_static()` 注入 `window.__DEBNAS_BUILD` 时按 JSON 字符串转义；静态目录的
+  前缀校验补上路径分隔符，避免 `/…/static-evil` 命中
+- README 的安全一节改写：明确「文件页 / 下载 / 上传 / `file_read` 都以 root 操作
+  任意路径」，补登录限速、HTTP 明文、供应链和头像外链的说明
+
+## 2026-11-10（群成员自动嗅探）
+
+### 新增
+
+- **群成员头像自动嗅探**：插件启动 8 秒后调一次 NapCat 的 `get_group_member_list`，
+  把「群名片 / 昵称 → QQ 号」写进 `plugin_data/astrbot_plugin_feiyu/members.json`；
+  之后有群消息、且距上次超过一小时，再静默嗅一次
+- 实测一次就拿到 8 条映射，包括从来没说过话的群成员，
+  不用等谁开口，也不用在代码里写死 QQ 号
+- debnas 侧 `_astrbot_feed()` 读这张表补 `uin`，优先级：
+  `history.jsonl` 里的 `uid`（最准）→ `members.json` → `@昵称(QQ号)` → 配置的显示名
+
+## 2026-11-10（群聊成员头像）
+
+### 新增
+
+- 群聊里每个人的真实头像：插件写 `history.jsonl` 时多记一个 `uid`（发送者 QQ 号），
+  debnas 用它拼 `q1.qlogo.cn` 的头像 URL；私聊本来就有号，这次一起统一了
+- 老记录没有 `uid`，用消息文本里的 `@昵称(QQ号)` 反推一个「名字 → QQ 号」的映射
+  兜底，所以今天之前的聊天记录也能显示头像（群里已经能对上多个昵称）
+- 头像加载失败（内网访问不到 qlogo）会自己退回首字方块，不会留一个破图
+
+## 2026-11-10（会话库不再自己造条目 + 静态资源指纹）
+
+### 修复
+
+- **图片的时间是编出来的**：页面上 18:59 那张 Minecraft 截图实际是 20:08 发的，
+  接口里根本不存在这条（`_astrbot_live_feed()` 返回 203 条，群聊 96 条里带图片的
+  0 条）。唯一能造出这种条目、还自带 base64 图片的数据源就是「会话库还原」
+  ——`_astrbot_db_feed()` 没有真实发送时间，它拿消息里的 `Current datetime` 锚点
+  往后顺延算，算歪了整段就错位。现在会话库**只能给已存在的日志条目补图片**，
+  对不上的一律丢弃，时间只认插件日志的毫秒真值
+- **改了代码但页面没变**：HTML 是 `no-store`，可里面的 `./app.js`、`./styles.css`
+  没有版本号，浏览器拿 ETag 校验后可能一直用旧文件。现在服务端在返回 HTML 时
+  给这两个 URL 打上文件 mtime 指纹（`?v=<mtime>`），部署一次 URL 就变一次，
+  旧脚本不可能再被跑起来；HTML 本身也改成不参与 304
+
+### 变更
+
+- `_astrbot_feed()` 保留 400 条（原 80 条），群聊/私聊各取自己的 40 条
+- **整个会话库数据源已删除**：`_astrbot_db_feed()`、`_DB_FEED` 缓存、
+  `_astrbot_db_path()` 一共 134 行，连同不再用的 `import sqlite3`。
+  留着「只补图不给时间」的口子照样会被人当成可用数据源，不如一次删干净；
+  QQ 动态现在只有插件日志这一个来源
+
+## 2026-11-10（群聊图片 + 窗口加大）
+
+### 修复
+
+- **群聊 / 私聊里都没有图片**：插件 `_append_history()` 只记文本，图片段直接丢了
+  （`history.jsonl` 里群聊 275 条、带 `media` 的 0 条）。现在 `gate()` 把收到的
+  图片段存到 `plugin_data/astrbot_plugin_feiyu/media/<内容md5>.<ext>`，
+  `after_sent()` 也把她自己发出去的图片记下来；纯图片消息记成 `[图片]`
+- **时间跳来跳去**：`_astrbot_feed()` 只取合并后的最后 80 条，群聊和私聊抢这
+  80 个位置，每个会话实际只剩三四十条，中间被整段截掉，看起来就是时间断档。
+  现在取 400 条，前端按会话各取 40 条再显示
+
+### 待确认
+
+- 用户反馈"时间是乱的"，我核对 `history.jsonl` 与 AstrBot 发送日志是逐秒一致的，
+  但没能看到用户屏幕上的实际渲染结果，需要一张截图或一条具体对不上的消息
+
+## 2026-11-10（群聊 / 私聊分开）
+
+时间对不上的根子不是数据错，是**群聊和私聊混在一条时间线里交叉**：她 20:15
+在群里说一句、同时在私聊里回一句，两条挨着出现，看上去就像时间跳了。
+
+### 变更
+
+- QQ 动态拆成两条独立的流，左栏顶部和首页面板各有两个标签：
+  `群聊 N` / `私聊 N`（N 是去重后的条数）
+- 选中的会话单独按 `ts` 升序渲染，群聊里不会再出现私聊的消息，反之亦然
+- 选择记在 `localStorage`（`debnas.qq.scope`），刷新/切换页面都保持
+- 左栏的标签塞在 sticky 标题里，往下翻也点得到；首页面板的标签放在标题下面
+- 去掉上一版加的「群聊/私聊」分隔条 —— 分开之后用不上了
+
+### 核对过的时间
+
+拿 `history.jsonl` 和 AstrBot 日志里的 `Prepare to send` 对过，秒级一致：
+
+```
+20:14:39 发来 我也看看          ↔ 20:14:39.679 Prepare to send
+20:15:35 反方向的钟 配周杰伦的封面 ↔ 20:15:35.321 Prepare to send
+20:15:38 我没发 是他们俩在推      ↔ 20:15:37.905 Prepare to send
+```
+
+## 2026-11-10（QQ 动态重做）
+
+前面几轮都在打补丁（前端补排序、服务端补字段），没找到真正原因。这次把整条
+链路拆了重写：**取数 → 排序 → 去重 → 渲染，只剩一个入口**。
+
+### 重做
+
+- `_astrbot_live_feed()` 收尾统一做三件事，别再指望各个数据源自己排好：
+  1. 按 `ts` 排序后，再按「同会话 + 同方向 + 同秒 + 同文本前 80 字」过一遍，
+     重复的直接丢；
+  2. 给每条生成**稳定 id**（`chat|dir|ts|文本前 40 字`），前端按 id 去重，
+     刷新时不会因为数组下标变动而重复追加；
+  3. 补齐 `hm`（HH:MM）和 `scope`（群聊 / 私聊）
+- 前端新增 `feedCanonical()`：**唯一的取数口**。先按 `ts` 数值升序（不是
+  `HH:MM:SS` 字符串，否则跨午夜会把 `00:xx` 排到最前），再按 id 去重，
+  左栏和首页面板都从它拿数据，不再各自跑一套循环
+- `feedRows()` 重写渲染：日期分组、**群聊 / 私聊切换处分隔**、间隔超 10 分钟
+  插时间点、每条气泡右下角标 `HH:MM`，顺序对不对一眼能核对
+- 首页面板 `<1400px` 才渲染（`feedInGutter()`），左栏能显示时首页不再画一遍；
+  窗口跨 1400px 缩放会重新渲染当前页
+
+### 为什么之前"还是乱"
+
+- 会话库推出来的时间可能和插件日志差很大，旧逻辑 180 秒内才认作同一条，
+  超了就当成两条 —— 同一条消息在时间线两头各出现一次
+- 群聊和私聊的消息本来就在同一个流里交替出现，之前没有任何分隔或标注，
+  看上去像是"顺序乱了"，其实是两个会话在交叉
+
+## 2026-11-10（QQ 动态重复与顺序）
+
+### 修复
+
+- **同一条消息在栏里出现两次**（一条在顶上、一条在底下）：插件日志和会话库
+  都会记到同一条消息，合并时按「同会话 + 同方向 + 文本前 80 字 + 180 秒内」
+  去重。会话库的时间是从分钟级锚点推的，偏出 3 分钟就配不上，于是同一条消息
+  留了两份，各自带着不同的时间戳插到时间线两头。现在配对窗口放到 **6 小时**
+  并挑时间最接近的那条，同一条消息只留插件日志那份（毫秒级真时间）
+- **首页面板和左侧栏同时画同一份列表**：`.qq-panel.inline-only` 本来靠
+  `@media (min-width: 1400px)` 隐藏，但窗口在边界附近缩放、或首屏与 resize
+  时序错开时会两边都在。改成 JS 也判断 `feedInGutter()`，左栏能显示时首页不再
+  渲染面板；跨 1400px 缩放时重新渲染当前页
+- **会话库补缺断了一个多小时**：19:42 那次改动把
+  `provider_settings.datetime_system_prompt` 关了，而会话库的时间锚点完全依赖
+  消息里的 `Current datetime`，关掉之后 `_astrbot_db_feed()` 直接返回 0 条。
+  已在 `astrbot-src/data/cmd_config.json` 里重新打开并重启 AstrBot
+  （只对新消息生效，历史对话要等下一轮才有锚点）
+- **表情包条目缺 `date`**：前端按 `date` 切「今天 / 昨天」分组，缺了会在时间线
+  中间插一个「最近」分组，看着像顺序断了；同时补上 `who` / `uin`，头像不再显示成 `?`
+
+### 变更
+
+- 前端渲染前统一按**数值 `ts`** 升序排一遍（`feedAscending()`），不再假设后端一定
+  排好；注意不能用 `HH:MM:SS` 字符串排，跨午夜时 `00:xx` 会被当成最早
+
+## 2026-11-10（新增 DeepSeek 余额块）
+
+- 右侧栏 mihomo 块下面新增 DeepSeek 余额块：显示账户余额、充值 / 赠送明细和更新时间，
+  每 60 秒自动刷新，也可以点「刷新」立即查；点右上角箭头收起，状态记在 `localStorage`
+- 余额由 debnas 后端代查（`POST /api/rpc` 的 `deepseek`，服务端缓存 60 秒，失败 15 秒后
+  重试），密钥只从环境变量 `DEEPSEEK_API_KEY` 或 `~/.config/deepseek/env` 读，
+  不下发到浏览器
 - 接口不通 / 没配密钥时块里直接显示原因，不会把控制台搞崩
-
-### 安全
-
-- 密钥只在服务端读，余额接口只回传厂商名、endpoint 和密钥末 4 位；endpoint 落在
-  本机 / 内网时只显示「本机端点」「内网端点」，不把网络拓扑带出去；密钥所在的
-  文件路径也不下发
-- 探测会读本机环境变量和 `~/.config/*/{env,.env,env.sh}` 里的 `*_API_KEY`（只进内存），
-  建议把密钥放在 0600 文件里，不要写进 unit 的 `Environment=`（`systemctl show` 可见）
+- 自动探测用的是哪家 API：扫环境变量和 `~/.config/*/{env,.env,env.sh}` 里所有
+  `*_API_KEY`，按 DeepSeek → OpenAI → Anthropic → … 的优先级挑一个，配合
+  `<NAME>_BASE_URL` / `<NAME>_API_BASE` 认 endpoint；块标题直接用探测到的名字，
+  下面一行显示 endpoint 和密钥末 4 位。不是 DeepSeek 端点时如实说明「没有
+  /user/balance 余额接口」，不硬编成某个厂商
 
 ## 2026-11-10（消息栏：时间、图片与表情）
 
@@ -32,7 +210,7 @@
 - 她发出去的图 / 表情包不显示：她发图走的是 AstrBot 的 `sticker_send`（参数 `sticker_id`）
   和 `send_message_to_user`（参数里 image 的 `path` / `url`），都是直接发送，不进消息链
   也不进会话库。改为只读 AstrBot 用户日志反推发送记录，会话优先取工具结果里的
-  `Message sent to session ...`；图片缓存在 DebNAS 自己的 `media/`，日志读不到时退回
+  `Message sent to session ...`；图片缓存在 debnas 自己的 `media/`，日志读不到时退回
   `stickers.json` 的 `lastUsedAt`
 - GIF 被抽成静态帧：会话库里的 `image_url` 是发给模型的那份 JPEG（GIF 只剩一帧），
   改为优先读 `data/temp/media_image_*` 原文件，GIF 保留动画；原文件被清掉才退回 base64
@@ -45,6 +223,8 @@
   root 读不到用户 journal 时不再整段丢失
 - `stickers.json` 的 `lastUsedAt` 从「日志读不到才用」改成一直当第二来源，
   和日志里已认出的记录按 180 秒去重
+- 配合 AstrBot 侧「按 QQ 号给主人消息加 `【管理员】` 标记」的改动：消息栏渲染前
+  去掉这段前缀，面板里不留标记噪音
 
 ### 性能
 
@@ -54,19 +234,6 @@
   降到 13ms，所以日志缓存能从 15 秒压到 2 秒
 - AstrBot 会话库按「库文件 + WAL 的 mtime/大小」缓存 5 秒，没写库就不重复解析
   那 2MB（里面是 base64 图片）
-
-### 安全
-
-- 默认值里不再带作者自己的 QQ 号：`DEBNAS_QQ_BOT_UIN` / `DEBNAS_QQ_OWNER` 改为空，
-  消息流里的显示名改由 `DEBNAS_QQ_BOT_NAME` / `DEBNAS_QQ_OWNER_NAME` 配置
-  （默认「机器人」「我」），插件内部「【xx的…】」提示的过滤也按这个名字走
-- `add-http-alias.sh` 里写死的局域网地址换成示例值；README 的安全一节写明仓库
-  不带真实身份，QQ 号和人设名都要自己配
-
-### 变更
-
-- README 的 QQ 动态、界面、已知限制、故障排查各节补上刷新节奏、`stickers.json`
-  第二来源、日志增量读和 QQ 身份的环境变量说明；仓库里丢掉的脚本执行位改回 755
 
 ### 恢复
 
@@ -302,7 +469,7 @@
 
 ### 变更
 
-- 900px 以下改为 Argon 风格固定顶栏：主题色渐变、毛玻璃、汉堡按钮、`DebNAS` 品牌、
+- 900px 以下改为 Argon 风格固定顶栏：主题色渐变、毛玻璃、汉堡按钮、`debnas` 品牌、
   当前页面名、头像；桌面端布局不变
 - 顶部标签收进左侧抽屉：桌面式分组（导航 / 系统）、active 高亮、遮罩、关闭按钮，
   支持点遮罩 / Esc / 点导航项关闭，打开时锁定页面滚动
@@ -526,7 +693,7 @@
 ### 变更
 
 - 项目采用 **GPL-3.0**（新增 `LICENSE`），新增 `NOTICE`，明确来源：
-  `DebNAS`（GPL-3.0）、Cockpit / cockpit-file-sharing / cockpit-identities（GPL-3.0）、
+  `debnas`（GPL-3.0）、Cockpit / cockpit-file-sharing / cockpit-identities（GPL-3.0）、
   noVNC（MPL-2.0）、Inter（OFL-1.1）及 Debian 软件包
 - 移除 **HarmonyOS Sans** 字体子集（华为字体许可限制修改版/单独再分发），中文改用 OFL 的 Noto 子集
 - **SnowLuma** logo 改为本地可选：公开仓库不包含该文件（`.gitignore` 忽略），

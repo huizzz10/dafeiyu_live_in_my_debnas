@@ -8,8 +8,13 @@
     shares: [],
     users: [],
     info: null,
+    qqScope: "group",  // 左栏看哪个会话：group | private，下面从 localStorage 覆盖
     loading: false
   };
+
+  try {
+    if (localStorage.getItem("debnas.qq.scope") === "private") state.qqScope = "private";
+  } catch (err) { /* 隐私模式下拿不到 localStorage，用默认值 */ }
 
   var VIEW_META = {
     home: { title: "总览", sub: "系统状态与最近活动" },
@@ -527,7 +532,9 @@
     live.mihomoTimer = setInterval(function () { if (!document.hidden) once("mihomo", pollMihomo); }, 12000);
   }
 
-  /* ---------------- DeepSeek 余额块 ---------------- */
+  /* ---------------- API 余额块 ---------------- */
+  var DS_TITLE = "鲸鲸的零花钱";
+
   function deepseekOpen() {
     try {
       var v = localStorage.getItem("debnas-deepseek-open");
@@ -544,6 +551,33 @@
     var n = parseFloat(v);
     if (isNaN(n)) return "—";
     return (n >= 1000 ? n.toFixed(0) : n.toFixed(2));
+  }
+
+  function dsSym(cur) {
+    if (!cur) return "";
+    return cur === "CNY" ? "¥" : (cur === "USD" ? "$" : cur + " ");
+  }
+
+  function dsStamp(at) {
+    if (!at) return "—";
+    var dt = new Date(at * 1000);
+    return ("0" + dt.getHours()).slice(-2) + ":" + ("0" + dt.getMinutes()).slice(-2);
+  }
+
+  // 一家厂商一块：名字 + 模型、余额、端点/密钥、查不到的原因
+  function dsProviderBlock(p) {
+    var bal = p.ok && p.items && p.items[0] ? p.items[0] : null;
+    var out = '<div class="ds-prov"><div class="ds-row"><span>' + esc(p.name) +
+      (p.model ? '<i class="ds-model">' + esc(p.model) + "</i>" : "") + "</span>" +
+      (bal ? "<b>" + esc(dsSym(bal.currency) + dsMoney(bal.total)) + "</b>" : "") + "</div>";
+    if (bal) {
+      out += '<div class="ds-row ds-sub"><span>充值 / 赠送</span><b>' +
+        esc(dsSym(bal.currency) + dsMoney(bal.topped) + " / " + dsMoney(bal.granted)) + "</b></div>";
+    }
+    out += dsProbeLine({ provider: p });
+    if (!p.ok) out += '<div class="ds-note">' + esc(p.error || "查不到余额") + "</div>";
+    else if (!p.available) out += '<div class="ds-note">账户标记为不可用</div>';
+    return out + "</div>";
   }
 
   function dsProbeLine(d) {
@@ -563,18 +597,24 @@
     dock.hidden = false;
     dock.className = "mh-dock ds-dock" + (open ? " open" : " collapsed");
 
-    var main = d && d.ok && (d.items || [])[0] ? d.items[0] : null;
+    var provs = (d && d.providers) || [];
+    var okProvs = provs.filter(function (p) { return p.ok; });
+    var top = okProvs[0] || null;
     var st = "读取中", cls = "wait";
     if (d) {
-      if (!d.ok) { st = "读取失败"; cls = "err"; }
-      else if (!d.available) { st = "余额不足"; cls = "warn"; }
-      else if (main) { st = (main.currency === "CNY" ? "¥" : "") + dsMoney(main.total); cls = "ok"; }
-      else { st = "无余额记录"; cls = "warn"; }
+      if (!provs.length) { st = "未配置"; cls = "warn"; }
+      else if (!top) { st = "读取失败"; cls = "err"; }
+      else {
+        var bal0 = (top.items || [])[0];
+        if (!top.available) { st = "余额不足"; cls = "warn"; }
+        else if (bal0) { st = dsSym(bal0.currency) + dsMoney(bal0.total); cls = "ok"; }
+        else { st = "无余额记录"; cls = "warn"; }
+      }
     }
 
-    var who = (d && d.provider && d.provider.name) || "API 余额";
+    var who = DS_TITLE;
     var head = '<div class="mh-head"><span class="mh-brand"><span class="mh-mark ds-mark">' +
-      esc(who.charAt(0).toUpperCase()) + '</span>' +
+      esc(who.charAt(0)) + '</span>' +
       '<span class="mh-brand-text">' + esc(who) + '</span></span>' +
       '<span class="mh-state ' + cls + '"><i></i>' + esc(st) + '</span>' +
       '<button class="mh-fold" id="ds-fold" type="button" title="' + (open ? "收起" : "展开") + '">' +
@@ -584,28 +624,12 @@
     var body;
     if (!d) {
       body = '<div class="mh-note">正在查询余额…</div>';
-    } else if (!d.ok) {
-      body = dsProbeLine(d) + '<div class="mh-note">' + esc(d.error || "查询失败") + "</div>" +
+    } else if (!provs.length) {
+      body = '<div class="mh-note">' + esc(d.error || "没找到 API 密钥") + "</div>" +
         '<div class="mh-actions"><button class="mh-btn" id="ds-refresh" type="button">重试</button></div>';
-    } else if (!main) {
-      body = '<div class="mh-note">接口没有返回余额。</div>' +
-        '<div class="mh-actions"><button class="mh-btn" id="ds-refresh" type="button">刷新</button></div>';
     } else {
-      var sym = main.currency === "CNY" ? "¥" : (main.currency === "USD" ? "$" : "");
-      var rows = (d.items || []).map(function (it) {
-        var s2 = it.currency === "CNY" ? "¥" : (it.currency === "USD" ? "$" : "");
-        return '<div class="ds-row"><span>充值' + (it.currency ? "（" + esc(it.currency) + "）" : "") +
-          '</span><b>' + s2 + dsMoney(it.topped) + "</b></div>" +
-          '<div class="ds-row"><span>赠送</span><b>' + s2 + dsMoney(it.granted) + "</b></div>";
-      }).join("");
-      var at = d.at ? new Date(d.at * 1000) : null;
-      var when = at ? ("0" + at.getHours()).slice(-2) + ":" + ("0" + at.getMinutes()).slice(-2) : "—";
-      body = '<div class="ds-balance"><span class="ds-sym">' + esc(sym) + "</span>" +
-        '<span class="ds-num">' + esc(dsMoney(main.total)) + "</span>" +
-        (d.available ? "" : '<span class="ds-tag">不可用</span>') + "</div>" +
-        '<div class="ds-rows">' + rows + "</div>" +
-        dsProbeLine(d) +
-        '<div class="mh-meta">' + esc(when) + " 更新 · 每 60 秒自动刷新</div>" +
+      body = provs.map(dsProviderBlock).join("") +
+        '<div class="mh-meta">' + esc(dsStamp(d.at)) + " 更新 · 每 60 秒自动刷新</div>" +
         '<div class="mh-actions"><button class="mh-btn" id="ds-refresh" type="button">刷新</button></div>';
     }
     dock.innerHTML = head + '<div class="mh-body">' + body + "</div>";
@@ -756,8 +780,16 @@
       "</div>" +
       '<div class="hw-block hw-mini">' +
         '<div class="hw-label">系统</div>' +
-        '<div class="hw-meta" data-hw="kernel">内核 ' + esc((state.info || {}).kernel || "—") + "</div>" +
+        '<div class="hw-meta" data-hw="kernel">' + esc(hwKernelText()) + "</div>" +
       "</div>";
+  }
+
+  // 侧栏系统块：内核 + 本站版本（VERSION 文件，部署时安装）
+  function hwKernelText() {
+    var info = state.info || {};
+    var text = "内核 " + (info.kernel || "—");
+    if (info.version && info.version !== "unknown") text += " · DebNAS " + info.version;
+    return text;
   }
 
   function refreshHwRail() {
@@ -795,7 +827,7 @@
       gm.style.display = gpu == null ? "none" : "";
       get("gpu-w").style.width = Math.max(0, Math.min(100, gpu || 0)) + "%";
     }
-    get("kernel").textContent = "内核 " + ((state.info || {}).kernel || "—");
+    get("kernel").textContent = hwKernelText();
   }
 
   function startHwPolling() {
@@ -876,7 +908,8 @@
       '<section class="home-grid">' +
         '<div class="col-main">' +
           renderApps() +
-          renderQq() +
+          // 左栏能显示时就不再画首页那块面板，同一份数据只渲染一次
+          (feedInGutter() ? "" : renderQq()) +
           '<section class="panel">' +
             '<div class="panel-head"><h3>最近共享</h3>' +
           '<button class="btn btn-text" data-nav="shares">查看全部</button></div>' +
@@ -1331,57 +1364,112 @@
     return date.slice(5).replace("-", "/");
   }
 
-  function renderGutterChat() {
-    var list = (state.qq || []).slice(-40);
-    var head = '<div class="gutter-head"><span>QQ 动态</span><span class="pulse"></span></div>';
-    if (!list.length) {
-      return head + '<div class="gchat"><div class="gchat-empty">' +
-        (state.qq ? "还没有消息" : "正在读取…") + "</div></div>";
-    }
+  // 左栏（#gutter-feed）只在宽屏出现；这个判断要和 styles.css 里的
+  // @media (min-width: 1400px) 保持一致，否则同一份消息会被画两遍。
+  function feedInGutter() {
+    return window.matchMedia("(min-width: 1400px)").matches;
+  }
+
+  // ---------------- QQ 动态 ----------------
+  // 群聊和私聊是两条独立的流，各自按时间从早到晚排，不再交叉。
+  function qqScopeOf(m) {
+    return String((m && m.chat) || "").indexOf("group:") === 0 ? "group" : "private";
+  }
+
+  var QQ_SCOPE_KEY = "debnas.qq.scope";
+
+  function qqScope() {
+    return state.qqScope === "private" ? "private" : "group";
+  }
+
+  // 取数只有这一个口：先按会话过滤，再按 ts 升序，再按 id 去重。
+  function feedCanonical(limit, scope) {
+    var want = scope || qqScope();
+    var seen = {};
+    var list = (state.qq || []).slice().sort(function (a, b) {
+      var d = Number(a.ts || 0) - Number(b.ts || 0);
+      if (d) return d;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    }).filter(function (m) {
+      if (qqScopeOf(m) !== want) return false;
+      var key = m.id || [m.chat, m.dir, m.ts, String(m.text || "").slice(0, 40)].join("|");
+      if (seen[key]) return false;
+      seen[key] = 1;
+      return true;
+    });
+    return limit ? list.slice(-limit) : list;
+  }
+
+  function qqScopeTabs() {
+    var n = { group: feedCanonical(0, "group").length, private: feedCanonical(0, "private").length };
+    var cur = qqScope();
+    return '<div class="qq-tabs">' +
+      '<button type="button" class="qq-tab' + (cur === "group" ? " on" : "") +
+      '" data-qq-scope="group">群聊<span>' + n.group + "</span></button>" +
+      '<button type="button" class="qq-tab' + (cur === "private" ? " on" : "") +
+      '" data-qq-scope="private">私聊<span>' + n.private + "</span></button></div>";
+  }
+
+  // 逐行渲染：日期分组、间隔超 10 分钟插一个时间点，每条气泡右下角标 HH:MM。
+  function feedRows(list) {
     var out = [];
     var prev = null;
     list.forEach(function (m) {
       var ts = Number(m.ts || 0);
-      var date = m.date || "";
-      if (!prev || date !== prev.date) {
-        out.push('<div class="gchat-day">' + esc(gutterDay(date)) + "</div>");
+      var gap = prev ? ts - Number(prev.ts || 0) : 1e9;
+      var newDay = !prev || (m.date || "") !== (prev.date || "");
+      if (newDay) {
+        out.push('<div class="gchat-day">' + esc(gutterDay(m.date)) + "</div>");
       }
-      var gap = prev && ts && prev.ts ? ts - prev.ts : 99999;
-      if (!prev || gap > 600) {
-        out.push('<div class="gchat-time">' + esc(String(m.time || "").slice(0, 5)) + "</div>");
+      if (newDay || gap > 600) {
+        out.push('<div class="gchat-time">' + esc(String(m.hm || m.time || "").slice(0, 5)) + "</div>");
       }
-      var cont = !!prev && prev.dir === m.dir && prev.who === m.who &&
-        date === prev.date && gap <= 180;
+      var cont = !!prev && !newDay && prev.dir === m.dir &&
+        prev.who === m.who && gap <= 180;
       var avatar = cont ? '<span class="gchat-avatar-spacer"></span>' : qqAvatarHtml(m);
       var name = (!cont && m.dir === "in")
         ? '<span class="gchat-name">' + esc(m.who || "QQ") + "</span>" : "";
+      var tip = ((m.date || "") + " " + (m.time || "")).trim();
       out.push('<div class="gchat-row ' + (m.dir === "out" ? "out" : "in") +
-        (cont ? " cont" : "") + '">' + avatar +
+        (cont ? " cont" : "") + '" title="' + esc(tip) + '">' + avatar +
         '<div class="gchat-body">' + name +
-        '<div class="gchat-bubble">' + qqText(m) + "</div></div></div>");
+        '<div class="gchat-bubble">' + qqText(m) +
+        '<span class="gchat-t">' + esc(m.hm || "") + "</span>" +
+        "</div></div></div>");
       prev = m;
     });
-    return head + '<div class="gchat">' + out.join("") + "</div>";
+    return out;
   }
 
-  function renderQq(compact) {
-    var limit = compact ? 12 : 4;
-    // 后端已按时间顺序（旧 → 新）返回；不要再按 HH:MM:SS 排序，
-    // 否则跨午夜时 00:xx 会被当成“最早”，最新消息反而被挤掉。
-    var list = (state.qq || []).slice(-limit);
+  function renderGutterChat() {
+    var list = feedCanonical(40);
+    var head = '<div class="gutter-head"><span>QQ 动态</span><span class="pulse"></span>' +
+      qqScopeTabs() + "</div>";
     if (!list.length) {
-      var qqReady = !!state.qq;
-      return '<section class="panel qq-panel inline-only">' +
-        '<div class="panel-head"><div class="panel-title"><h3>QQ 动态</h3></div></div>' +
-        emptyBlock(qqReady ? "暂无消息" : "正在读取消息…",
-          qqReady ? "机器人收到或发出的消息会出现在这里" : "正在读取最近的聊天记录…") + "</section>";
+      return head + '<div class="gchat"><div class="gchat-empty">' +
+        (!state.qq ? "正在读取…" : (qqScope() === "group" ? "群里还没有消息" : "私聊还没有消息")) +
+        "</div></div>";
+    }
+    return head + '<div class="gchat">' + feedRows(list).join("") + "</div>";
+  }
+
+  function renderQq() {
+    var list = feedCanonical(8);
+    var scopeName = qqScope() === "group" ? "群聊" : "私聊";
+    var head = '<div class="panel-head"><div class="panel-title"><h3>QQ 动态</h3>' +
+      '<span class="muted">' + scopeName + " · 最近 " + list.length + " 条</span></div>" +
+      '<span class="chip chip-accent"><span class="pulse"></span>实时</span></div>' +
+      qqScopeTabs();
+    if (!list.length) {
+      return '<section class="panel qq-panel inline-only">' + head +
+        emptyBlock(!state.qq ? "正在读取消息…" : "暂无消息",
+          !state.qq ? "正在读取最近的聊天记录…" : "换个标签看看另一个会话") + "</section>";
     }
     var rows = list.map(function (m) {
-      var meta = '<div class="qq-meta"><span>' + esc(m.time) + "</span>" +
+      var meta = '<div class="qq-meta"><span>' + esc(m.hm || m.time) + "</span>" +
         (m.dir === "in" ? "<b>" + esc(m.who) + "</b>" : "") + "</div>";
-      var bodyText = compact ? stripReplyPrefix(m.text) : m.text;
       var body = '<div class="qq-text">' +
-        qqText({ text: bodyText || m.text, media: m.media }) + "</div>";
+        qqText({ text: m.text || "", media: m.media }) + "</div>";
       if (m.dir === "in") {
         return '<div class="qq-row in">' + qqAvatarHtml(m) +
           '<div class="qq-bubble">' + meta + body + "</div></div>";
@@ -1389,14 +1477,7 @@
       return '<div class="qq-row out">' +
         '<div class="qq-bubble out">' + meta + body + "</div>" + qqAvatarHtml(m) + "</div>";
     }).join("");
-    if (compact) {
-      return '<div class="gutter-head"><span>QQ 动态</span><span class="pulse"></span></div>' +
-        '<div class="gutter-list">' + rows.replace(/class="qq-row /g, 'class="gutter-row ') + "</div>";
-    }
-    return '<section class="panel qq-panel inline-only">' +
-      '<div class="panel-head"><div class="panel-title"><h3>QQ 动态</h3>' +
-      '<span class="muted">最近 ' + list.length + " 条</span></div>" +
-      '<span class="chip chip-accent"><span class="pulse"></span>实时</span></div>' +
+    return '<section class="panel qq-panel inline-only">' + head +
       '<div class="qq-list">' + rows + "</div></section>";
   }
 
@@ -3935,7 +4016,8 @@
         "<li><span>内核</span><b>" + esc(s.kernel || "—") + "</b></li>" +
         "<li><span>运行时长</span><b>" + fmtUptime(s.uptime || 0) + "</b></li>" +
         "<li><span>当前用户</span><b>" + esc(state.user ? state.user.name : "—") + "</b></li>" +
-        "<li><span>界面版本</span><b>" + esc(window.__DEBNAS_BUILD || "dev") + "</b></li>" +
+        "<li><span>界面版本</span><b>" +
+          esc(window.__DEBNAS_BUILD || (state.info || {}).version || "dev") + "</b></li>" +
       "</ul>" +
       '<div class="dialog-actions"><button class="btn btn-primary" data-close>知道了</button></div></div>',
       function (dlg) {
@@ -4594,6 +4676,28 @@
         }
       }, true);
     }
+
+    // 窗口跨过 1400px 时左栏出现/消失，首页那块 QQ 面板要跟着换，别两边同时留着
+    var gutterMode = feedInGutter();
+    window.addEventListener("resize", function () {
+      var now = feedInGutter();
+      if (now === gutterMode) return;
+      gutterMode = now;
+      if (state.view === "home") render();
+    }, { passive: true });
+
+    // 群聊 / 私聊切换：左栏和首页面板共用一套状态，记在 localStorage 里
+    document.addEventListener("click", function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest("[data-qq-scope]") : null;
+      if (!btn) return;
+      e.preventDefault();
+      var next = btn.getAttribute("data-qq-scope") === "private" ? "private" : "group";
+      if (next === qqScope()) return;
+      state.qqScope = next;
+      try { localStorage.setItem(QQ_SCOPE_KEY, next); } catch (err) { /* 忽略 */ }
+      renderGutter();
+      if (state.view === "home") render();
+    });
 
     $("#avatar").addEventListener("click", function (e) {
       e.stopPropagation();
