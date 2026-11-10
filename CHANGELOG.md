@@ -18,14 +18,39 @@
   改为优先读 `data/temp/media_image_*` 原文件，GIF 保留动画；原文件被清掉才退回 base64
 - 收到的图片不再依赖插件存图：改为从会话库的 `image_url`（base64 data URL）和
   `data/temp` 原文件取；引用消息里的图和工具产出的图（B 站抽帧）会被排除
+- 她发的东西要手动刷新才出现：前端判断「消息流有没有变」原来只比条数和最后一条的
+  时间，而她发的图带的是工具调用时间、会插在中间，条数又封顶 80，于是永远判定没变。
+  改成比对最近 40 条的时间 + 方向 + 图片名 + 文本摘要
+- 认她的发送记录太慢：日志取法加了 `--file` / `--user-unit` / `--user` 三种，
+  root 读不到用户 journal 时不再整段丢失
+- `stickers.json` 的 `lastUsedAt` 从「日志读不到才用」改成一直当第二来源，
+  和日志里已认出的记录按 180 秒去重
+
+### 性能
+
+- 消息流刷新：前端轮询 12 秒 → 3 秒，服务端缓存 8 秒 → 1 秒；实测新消息 2.4 秒上屏
+  （之前要十几秒，还得手动刷新）
+- 日志改增量读：第一次读 24 小时，之后只读「上次位置 -2 秒」，单次解析从 560ms
+  降到 13ms，所以日志缓存能从 15 秒压到 2 秒
+- AstrBot 会话库按「库文件 + WAL 的 mtime/大小」缓存 5 秒，没写库就不重复解析
+  那 2MB（里面是 base64 图片）
+
+### 安全
+
+- 默认值里不再带作者自己的 QQ 号：`DEBNAS_QQ_BOT_UIN` / `DEBNAS_QQ_OWNER` 改为空，
+  消息流里的显示名改由 `DEBNAS_QQ_BOT_NAME` / `DEBNAS_QQ_OWNER_NAME` 配置
+  （默认「机器人」「我」），插件内部「【xx的…】」提示的过滤也按这个名字走
+- `add-http-alias.sh` 里写死的局域网地址换成示例值；README 的安全一节写明仓库
+  不带真实身份，QQ 号和人设名都要自己配
+
+### 变更
+
+- README 的 QQ 动态、界面、已知限制、故障排查各节补上刷新节奏、`stickers.json`
+  第二来源、日志增量读和 QQ 身份的环境变量说明；仓库里丢掉的脚本执行位改回 755
 
 ### 恢复
 
 - `astrbot_plugin_feiyu/main.py` 恢复成改动前的版本，AstrBot 侧不做任何修改
-
-### 变更
-
-- README 的 QQ 动态、界面、安全、已知限制、故障排查各节按现状改写，CHANGELOG 补本条目
 
 ## 2026-11-10（移除 SnowLuma 集成）
 
@@ -39,11 +64,13 @@
 
 ### 变更
 
-- 图片 / 表情代理 `/api/qqmedia` 改为读本机缓存：图片来自 AstrBot `data/temp` 下的原图
-  和 debnas 自己的 `media/` 缓存，表情来自 QQ 客户端的
-  `EmojiSystermResource/<id>/png`，不再依赖 SnowLuma 的 `get_image` / `fetch_face_entity`
-- 工具产出的图片（B 站抽帧）和引用消息里带的图不算她发的图，不进 `media/` 也不显示
+- 图片 / 表情代理 `/api/qqmedia` 改为读本机缓存：图片来自插件新存的 `media/` 目录，
+  表情来自 QQ 客户端的 `EmojiSystermResource/<id>/png`，不再依赖 SnowLuma 的
+  `get_image` / `fetch_face_entity`
+- 插件收到图片时按 md5 存一份（每条最多 4 张）写进 `history.jsonl` 的 `media` 字段，
+  控制台据此显示缩略图；工具产出的图片（B 站抽帧）不进消息链，也不会显示
 - `rpc_vnc` 使用前端传来的容器名，不再写死 `snowluma`
+- README 的 QQ 动态、应用入口、环境变量、故障排查各节按现状改写
 - `deploy-web.sh` 不再处理 SnowLuma logo，也不再安装 `qqfeed.sh`
 
 ## 2026-11-08（仓库清理）

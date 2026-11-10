@@ -320,15 +320,23 @@
   function startQqPolling() {
     if (live.qqTimer) return;
     pollQq();
-    live.qqTimer = setInterval(function () { if (!document.hidden) once("qq", pollQq); }, 12000);
+    // 消息流刷新快一点：服务端缓存 1 秒，这里 3 秒一轮，新消息 2~4 秒就能看到
+    live.qqTimer = setInterval(function () { if (!document.hidden) once("qq", pollQq); }, 3000);
   }
 
   function pollQq() {
     if (document.hidden) return Promise.resolve();
     return API.qqFeed().then(function (feed) {
       var prev = state.qq || [];
-      var same = prev.length === feed.length &&
-        (!feed.length || prev[prev.length - 1].time === feed[feed.length - 1].time);
+      // 只要可见窗口里有任何一条变了就重渲染。她发的图带的是工具调用时间，
+      // 会插在中间，光比「条数 + 最后一条时间」会漏掉（条数还有 80 条上限）。
+      var sig = function (list) {
+        return list.slice(-40).map(function (m) {
+          var f = m.media && m.media[0] ? m.media[0].file : "";
+          return (m.ts || "") + m.dir + f + String(m.text || "").slice(0, 12);
+        }).join("|");
+      };
+      var same = prev.length === feed.length && sig(prev) === sig(feed);
       state.qq = feed;
       if (same) return;
       renderGutter();
@@ -997,7 +1005,7 @@
   /* 应用按容器自动检测：容器名 / 发布端口 / 页面标题命中才算存在，没有就不显示 */
   var APP_DEFS = [
     { id: "astrbot", name: "AstrBot", host: "astrbot", ports: [6185],
-      icon: "chat", desc: "机器人控制台" },
+      icon: "chat", desc: "AstrBot 控制台" },
     { id: "napcat", name: "NapCat", host: "napcat", ports: [6099],
       icon: "chat", desc: "QQ 协议端面板" },
     { id: "novnc", name: "noVNC", match: /novnc|vnc/i, ports: [6081],
@@ -1124,7 +1132,7 @@
     var ncBase = "http://" + host + ":" + (nc.port || 6099) + "/webui";
     var ncUrl = ncBase + (nc.token ? "?token=" + encodeURIComponent(nc.token) : "");
     var astro = credCard({
-      name: "AstrBot", desc: "机器人控制台 · 聊天、插件与日志", icon: "chat",
+      name: "AstrBot", desc: "AstrBot 控制台 · 聊天、插件与日志", icon: "chat",
       action: "打开控制台", url: abUrl, online: ab.online !== false,
       rows: credRow("地址", abUrl) +
         credRow("用户名", ab.username || "astrbot") +

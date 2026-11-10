@@ -458,7 +458,7 @@ def rpc_apps(_):
                 continue
             seen.add(port)
             entries.append({"name": name, "port": port, "code": "000", "title": ""})
-    # 迁移后的机器人宿主进程：AstrBot 控制台 / NapCat 面板
+    # 迁移后的宿主进程：AstrBot 控制台 / NapCat 面板
     for name, port in (("astrbot", 6185), ("napcat", 6099)):
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.4):
@@ -525,7 +525,7 @@ def rpc_credentials(_):
 
 
 QQ_FEED_CACHE = {"at": 0, "data": []}
-QQ_FEED_TTL = float(os.environ.get("DEBNAS_QQ_FEED_TTL", "8"))
+QQ_FEED_TTL = float(os.environ.get("DEBNAS_QQ_FEED_TTL", "1"))
 
 
 def _astrbot_history_path():
@@ -729,12 +729,14 @@ def _sticker_catalog():
     return out
 
 
-def _journal_command(hours):
-    """拼 journalctl 命令：root 直接读用户 journal 文件，普通用户走 --user-unit。"""
-    since = f"-{int(hours)}h"
-    if os.geteuid() != 0:
-        return ["journalctl", "--user-unit", "astrbot.service", "--since", since,
-                "-o", "json", "--no-pager"]
+def _journal_commands(since):
+    """journalctl 的几种取法，挨个试到能读出内容为止。
+
+    root 跑服务时 `--user-unit` 看到的是 root 自己的用户日志，所以要直接
+    `--file` 读目标用户的 journal 文件；普通用户反过来用 `--user-unit`。
+    """
+    tail = ["--since", since, "-o", "json", "--no-pager"]
+    cmds = []
     uid = 1000
     user = os.environ.get("DEBNAS_WEB_RUN_AS")
     if user:
@@ -742,21 +744,24 @@ def _journal_command(hours):
             uid = pwd.getpwnam(user).pw_uid
         except KeyError:
             pass
-    files = []
-    for base in ("/var/log/journal", "/run/log/journal"):
-        files.extend(
-            path for path in glob.glob(os.path.join(base, "*", f"user-{uid}.journal"))
-        )
-    if files:
-        cmd = ["journalctl"]
-        for path in sorted(files)[:4]:
-            cmd += ["--file", path]
-        return cmd + ["--since", since, "-o", "json", "--no-pager"]
-    return ["journalctl", "--user-unit", "astrbot.service", "--since", since,
-            "-o", "json", "--no-pager"]
+    if os.geteuid() == 0:
+        files = []
+        for base in ("/var/log/journal", "/run/log/journal"):
+            files.extend(
+                path for path in glob.glob(os.path.join(base, "*", f"user-{uid}.journal"))
+            )
+        if files:
+            cmd = ["journalctl"]
+            for path in sorted(files)[:4]:
+                cmd += ["--file", path]
+            cmds.append(cmd + tail)
+    cmds.append(["journalctl", "--user-unit", "astrbot.service"] + tail)
+    cmds.append(["journalctl", "--user", "-u", "astrbot"] + tail)
+    return cmds
 
 
-_STICKER_SENDS = {"at": 0.0, "items": []}
+_JOURNAL = {"since": 0.0, "at": 0.0, "items": [], "chat": ""}
+_JOURNAL_TTL = 2.0
 _EVENT_LINE = re.compile(r"\[default\] \[[^\]]*\] (\d+)/(\d+):")
 _SESSION_LINE = re.compile(r"Message sent to session (\w+):(\w+):(\d+)")
 _TOOL_LINE = re.compile(r"使用工具：(sticker_send|send_message_to_user)，参数：(.*)$")
@@ -765,24 +770,10 @@ _IMAGE_ARG = re.compile(r"'type': 'image'[^}]*?'(?:path|file)': '([^']+)'")
 _IMAGE_URL_ARG = re.compile(r"'type': 'image'[^}]*?'url': '([^']+)'")
 
 
-def _journal_sticker_sends(hours=12):
-    """从 AstrBot 的用户日志里捡出她发出去的表情包 / 图片。
-
-    只读 journalctl，不碰 AstrBot 代码。两条发送路径都要认：
-      - sticker_send：参数里带 sticker_id
-      - send_message_to_user：参数里带 image 的 path / url
-    会话优先用工具结果里的 “Message sent to session ...”，没有就往前推事件行。
-    """
-    now = time.time()
-    if now - _STICKER_SENDS["at"] < 60:
-        return _STICKER_SENDS["items"]
-    try:
-        raw = subprocess.run(
-            _journal_command(hours), capture_output=True, text=True, timeout=25
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        raw = ""
-    items, chat, pending = [], "", []
+def _parse_journal(raw, chat):
+    """解析一段 journal JSON，返回 (新条目, 最后一条会话)。"""
+    items = []
+    pending = []
     for line in raw.splitlines():
         try:
             rec = json.loads(line)
@@ -826,14 +817,51 @@ def _journal_sticker_sends(hours=12):
             if not found:
                 for m in _IMAGE_URL_ARG.finditer(args):
                     found.append({"kind": "url", "ref": m.group(1)})
-        if not found:
-            continue
         for item in found:
             it = {"ts": ts, "chat": chat, "kind": item["kind"], "ref": item["ref"]}
             items.append(it)
             pending.append(it)
-    _STICKER_SENDS.update(at=now, items=items)
-    return items
+    return items, chat
+
+
+def _journal_sticker_sends(hours=24):
+    """从 AstrBot 的用户日志里捡出她发出去的表情包 / 图片。
+
+    只读 journalctl，不碰 AstrBot 代码。两条发送路径都要认：
+      - sticker_send：参数里带 sticker_id
+      - send_message_to_user：参数里带 image 的 path / url
+    会话优先用工具结果里的 “Message sent to session ...”，没有就往前推事件行。
+
+    性能：首次读 `hours` 小时，之后只读「上次读到的位置 -2 秒」，增量拼到缓存里，
+    日志刷新从 560ms 降到几十毫秒，所以能 3 秒刷一次。
+    """
+    now = time.time()
+    if now - _JOURNAL["at"] < _JOURNAL_TTL:
+        return _JOURNAL["items"]
+    since = _JOURNAL["since"]
+    if since and now - since < hours * 3600:
+        since_arg = "@%d" % int(since - 2)
+    else:
+        since_arg = "-%dh" % int(hours)
+    raw = ""
+    for cmd in _journal_commands(since_arg):
+        try:
+            raw = subprocess.run(cmd, capture_output=True, text=True, timeout=20).stdout
+        except (OSError, subprocess.SubprocessError):
+            raw = ""
+        if raw.strip():
+            break
+    fresh, chat = _parse_journal(raw, _JOURNAL["chat"])
+    if fresh:
+        known = {(int(it["ts"]), it["kind"], it["ref"]) for it in _JOURNAL["items"]}
+        merged = _JOURNAL["items"] + [it for it in fresh
+                                      if (int(it["ts"]), it["kind"], it["ref"]) not in known]
+        _JOURNAL["items"] = [it for it in merged if it["ts"] >= now - 86400]
+    _JOURNAL["chat"] = chat
+    if fresh or raw.strip() or not _JOURNAL["since"]:
+        _JOURNAL["since"] = now
+    _JOURNAL["at"] = now
+    return _JOURNAL["items"]
 
 
 def _sticker_image(sticker_id):
@@ -897,17 +925,23 @@ def _sticker_last_used():
 def _sent_sticker_feed():
     """把「她发了表情包」补成消息流条目（文本用 [图片]，图走本地缓存）。"""
     now = time.time()
-    sends = _journal_sticker_sends()
-    if not sends:
-        # 没有日志可读时退回 stickers.json；会话按最近那条她发的话来归属
-        recent = [it for it in _astrbot_feed() if it.get("dir") == "out"]
-        sends = []
-        for send in _sticker_last_used():
-            near = [it for it in recent if abs(it["ts"] - send["ts"]) <= 300]
-            if not near:
-                continue
-            send["chat"] = min(near, key=lambda it: abs(it["ts"] - send["ts"]))["chat"]
-            sends.append(send)
+    sends = list(_journal_sticker_sends())
+    # stickers.json 的 lastUsedAt 一直当第二来源：日志读不到（root 读用户 journal
+    # 有时会失败）时她发的表情包也不会整条消失。会话按最近那条她发的话归属。
+    from_journal = [it for it in sends if it.get("kind") == "sticker"]
+    recent = None
+    for send in _sticker_last_used():
+        if send["ts"] < now - 86400:
+            continue
+        if any(abs(send["ts"] - it["ts"]) <= 180 for it in from_journal):
+            continue
+        if recent is None:
+            recent = [it for it in _astrbot_feed() if it.get("dir") == "out"]
+        near = [it for it in recent if abs(it["ts"] - send["ts"]) <= 300]
+        if not near:
+            continue
+        send["chat"] = min(near, key=lambda it: abs(it["ts"] - send["ts"]))["chat"]
+        sends.append(send)
     out = []
     for send in sends:
         if not send.get("chat") or send["ts"] < now - 86400:
@@ -926,11 +960,23 @@ def _sent_sticker_feed():
             "time": time.strftime("%H:%M:%S", time.localtime(send["ts"])),
             "chat": send["chat"],
             "dir": "out",
-            "name": "机器人",
+            "name": _qq_name("bot"),
             "text": "[图片]",
             "media": [{"kind": "image", "file": name}],
         })
     return out
+
+
+_QQ_NAMES = {"bot": "机器人", "owner": "我"}
+
+
+def _qq_name(kind):
+    """机器人和对方在消息流里显示的名字。
+
+    走环境变量，仓库里不留真实 QQ 号和人设名；没配就用中性默认值。
+    """
+    env = "DEBNAS_QQ_BOT_NAME" if kind == "bot" else "DEBNAS_QQ_OWNER_NAME"
+    return os.environ.get(env) or _QQ_NAMES[kind]
 
 
 def _clean_feed_text(text):
@@ -947,13 +993,13 @@ def _clean_feed_text(text):
     if m:
         text = "[文件] " + m.group(1).strip()
     text = text.strip()
-    if text.startswith("【机器人的") or text.startswith("【系统"):
+    if text.startswith("【%s的" % _qq_name("bot")) or text.startswith("【系统"):
         return ""
     return text
 
 
 def _astrbot_feed():
-    """读机器人插件新写入的实时记录（只认 src=astrbot 的行）。"""
+    """读 QQ 插件新写入的实时记录（只认 src=astrbot 的行）。"""
     try:
         with open(_astrbot_history_path(), encoding="utf-8", errors="replace") as f:
             lines = f.readlines()[-1200:]
@@ -979,8 +1025,8 @@ def _astrbot_feed():
         kind, _, peer = chat.partition(":")
         out = rec.get("role") == "me"
         owner = os.environ.get("DEBNAS_QQ_OWNER", "")
-        who = "机器人" if out else (
-            "我" if kind == "private" and peer == owner else
+        who = _qq_name("bot") if out else (
+            _qq_name("owner") if kind == "private" and owner and peer == owner else
             (str(rec.get("name") or peer or "QQ")))
         items.append({
             "time": time.strftime("%H:%M:%S", time.localtime(t)),
@@ -999,11 +1045,31 @@ def _astrbot_feed():
     return items[-80:]
 
 
+_DB_FEED = {"key": None, "at": 0.0, "items": []}
+
+
 def _astrbot_db_feed():
-    """从 AstrBot 的 conversations 表还原真实对话（含今天的会话）。"""
+    """从 AstrBot 的 conversations 表还原真实对话（含今天的会话）。
+
+    这份内容有 2MB 左右（里面是 base64 图片），解析一次 15~20ms，
+    所以按「库文件 + WAL 的 mtime/大小」缓存 5 秒，没写库就直接复用。
+    """
     path = _astrbot_db_path()
     if not os.path.exists(path):
         return []
+    try:
+        st = os.stat(path)
+        try:
+            wal = os.stat(path + "-wal")
+            wal_key = (wal.st_mtime_ns, wal.st_size)
+        except OSError:
+            # 刚 checkpoint 过就没有 WAL，库文件本身的 mtime/大小照样能当缓存键
+            wal_key = (0, 0)
+        key = (st.st_mtime_ns, st.st_size) + wal_key
+    except OSError:
+        key = None
+    if key and _DB_FEED["key"] == key and time.time() - _DB_FEED["at"] < 5:
+        return list(_DB_FEED["items"])
     try:
         conn = sqlite3.connect("file:" + path + "?mode=ro", uri=True, timeout=2)
         conn.row_factory = sqlite3.Row
@@ -1095,8 +1161,8 @@ def _astrbot_db_feed():
                 continue
             out = role == "assistant"
             owner = os.environ.get("DEBNAS_QQ_OWNER", "")
-            who = ("机器人" if out else
-                   ("我" if (not is_group and peer == owner) else
+            who = (_qq_name("bot") if out else
+                   (_qq_name("owner") if (not is_group and owner and peer == owner) else
                     ("群聊" if is_group else "私聊")))
             items.append({
                 "time": time.strftime("%H:%M:%S", time.localtime(ts)),
@@ -1112,7 +1178,10 @@ def _astrbot_db_feed():
                 "media": media,
             })
     items.sort(key=lambda x: x["ts"])
-    return items[-80:]
+    items = items[-80:]
+    if key:
+        _DB_FEED.update(key=key, at=time.time(), items=items)
+    return items
 
 
 def _astrbot_live_feed():

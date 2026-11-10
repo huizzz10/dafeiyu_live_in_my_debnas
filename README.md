@@ -65,10 +65,20 @@ NapCat token 从它的 `webui.json` 读，配置方法见[「快速开始」](#�
 
 QQ 动态的数据只读不写：插件写的 `astrbot_plugin_feiyu/history.jsonl` 提供毫秒时间，
 AstrBot 会话库 `data_v4.db` 补日志里缺的消息，她发出去的图片 / 表情包则从
-`journalctl` 里的 `sticker_send`、`send_message_to_user` 反推。图片按 md5 缓存在
-`/var/lib/debnas-web/media/`（`DEBNAS_WEB_STATE` 可改），原图优先用 AstrBot
-`data/temp` 下那一份，GIF 才不会被抽成静态帧。`DEBNAS_QQ_BOT_UIN` /
-`DEBNAS_QQ_OWNER` 默认是作者自己的 QQ 号，换机器要按自己的号改。
+`journalctl` 里的 `sticker_send`、`send_message_to_user` 反推；`stickers.json` 的
+`lastUsedAt` 一直当第二来源，日志漏掉的记录也能补回来（和日志按 180 秒去重）。
+图片按 md5 缓存在 `/var/lib/debnas-web/media/`（`DEBNAS_WEB_STATE` 可改），原图优先用
+AstrBot `data/temp` 下那一份，GIF 才不会被抽成静态帧。
+
+刷新是「前端 3 秒一次定时拉、服务端缓存 1 秒」（`DEBNAS_QQ_FEED_TTL` 可改），
+所以新消息 2~4 秒就上屏。为了让 3 秒一轮不烧 CPU，日志第一次读 24 小时、之后只读
+「上次位置 -2 秒」的增量，会话库只在库文件或 WAL 变过时才重新解析（那份有 2 MB
+base64 图片）。
+
+QQ 号和人设名都不带默认值：`DEBNAS_QQ_BOT_UIN` / `DEBNAS_QQ_OWNER` 填机器人和
+你自己的 QQ 号，不填就只显示「群聊 / 私聊」、头像退回占位图；
+`DEBNAS_QQ_BOT_NAME` / `DEBNAS_QQ_OWNER_NAME` 填两边在消息流里的显示名
+（默认「机器人」「我」）。写进 `debnas-web.service` 的 `Environment=` 里即可。
 
 mihomo 没装或架构不匹配时，跑 `sudo ./install-mihomo.sh --check` 看推荐资产，
 再跑 `sudo ./install-mihomo.sh` 安装。
@@ -84,7 +94,8 @@ mihomo 没装或架构不匹配时，跑 `sudo ./install-mihomo.sh --check` 看�
 - **深浅色**：默认跟随系统（登录页也跟随），也可以手动固定浅色 / 深色
 - **QQ 聊天流**：左侧留白栏按天分隔，间隔超过 10 分钟补时间，180 秒内同一人的消息
   合并头像；标题吸顶，往上翻看旧消息时不会被新消息拉回底部；图片是异步加载的，
-  只有正贴着底部时才重新贴底，翻上去看图不会半路被拽回来；表情包和普通图片一样等比缩放
+  只有正贴着底部时才重新贴底，翻上去看图不会半路被拽回来；表情包和普通图片一样等比缩放；
+  新消息 3 秒一轮自动上屏，不用手动刷新
 - **形状与动效**：圆角 10 / 16 / 24 / 28 / 全圆，弹性缓动
   `cubic-bezier(.34, 1.56, .64, 1)`；系统开了「减少动态效果」就直接关掉动画
 - **离线资源**：Inter + Noto Sans SC 子集、图标、noVNC、xterm.js 都随仓库自带
@@ -178,6 +189,8 @@ NapCat 的 token 直接读
 - 「凭据」页只对已登录会话开放；AstrBot 密码从 0600 的
   `~/.config/debnas-web/credentials.json` 读，NapCat token 从 `webui.json` 读。
   页面会把明文交给任何登录账号，和上面「登录账号≈管理员」是同一个前提
+- 仓库里不带真实身份：QQ 号、人设名、局域网地址都是环境变量或示例值，默认值只有
+  中性占位（`DEBNAS_QQ_*` 的配置见[上面](#快速开始)的 QQ 动态一段）
 
 如果机器上还有普通 SSH 用户，建议在 `/etc/pam.d/debnas-web` 限制只允许 sudo 组登录：
 
@@ -196,9 +209,10 @@ account  required  pam_succeed_if.so user ingroup sudo
 - 容器操作依赖运行账号的 rootless podman
 - QQ 动态只读 AstrBot 的插件历史（`astrbot_plugin_feiyu/history.jsonl`）和会话库
   （`data_v4.db`），默认最近 24 小时、最多 80 条；没有时间锚点的消息会被跳过
-- 她发出去的图片 / 表情包靠读 AstrBot 的 systemd 日志反推，AstrBot 不在
-  `astrbot.service` 里跑就读不到；读不到时只退回 `stickers.json` 的 `lastUsedAt`，
-  显示不全。系统表情读的是本机 QQ 客户端的缓存，换 QQ 版本或清缓存会掉图
+- 她发出去的图片 / 表情包靠读 AstrBot 的 systemd 日志反推，日志取法依次试
+  `--file` / `--user-unit` / `--user`，都读不到时只剩 `stickers.json` 的 `lastUsedAt`
+  兜底；表情包要对得上时间点才显示，仍可能缺几条。系统表情读的是本机 QQ 客户端的
+  缓存，换 QQ 版本或清缓存会掉图
 - 会话库里的图片是发给模型的那份压缩图：原文件被清掉后退回 base64，GIF 只剩一帧
 - AstrBot / NapCat 要自己安装并监听 6185 / 6099；凭据页只做展示，AstrBot 面板改密后
   要手动同步 `credentials.json`
@@ -217,7 +231,7 @@ python3 -m py_compile web/server.py
 node --check web/frontend/app.js
 node --check web/api-web.js
 node --check web/cockpit-shim.js
-bash -n deploy-web.sh install-deps.sh install-mihomo.sh
+bash -n deploy-web.sh install-deps.sh install-mihomo.sh add-http-alias.sh
 ```
 
 没有测试，欢迎补测试和 PR。常见问题：
@@ -232,7 +246,7 @@ bash -n deploy-web.sh install-deps.sh install-mihomo.sh
 | 凭据页显示「（未配置）」 | `~/.config/debnas-web/credentials.json` 是否存在、0600 |
 | 左侧 QQ 动态空白 | AstrBot 是否在跑，`history.jsonl` / `data_v4.db` 是否有新记录 |
 | 动态里有消息但没图 | `data/temp` 里的原图是否还在，`/var/lib/debnas-web/media/` 是否可写 |
-| 她发的表情包 / 图片不出现 | `journalctl --user-unit astrbot.service` 能不能读到 |
+| 她发的表情包 / 图片不出现 | `journalctl --user-unit astrbot.service` / `journalctl --user -u astrbot` 能不能读到 |
 
 日志：
 
