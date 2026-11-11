@@ -1,5 +1,173 @@
 # 变更记录
 
+## 2026-11-12（移除 AstrBot / NapCat 残留代码，版本 0.2.6）
+
+### 清理
+
+- `web/server.py` 删掉约 17.6 KB AstrBot 时代的死代码：
+  - 路径类：`_astrbot_history_path` / `_astrbot_media_dir` / `_astrbot_temp_dir`
+  - 数据类：`_astrbot_feed` / `_astrbot_live_feed` / `_sent_sticker_feed` /
+    `_journal_sticker_sends` / `_sticker_last_used` / `_sticker_catalog`
+  - 缓存类：`_cache_local_image` / `_cache_received_image` / `_RECEIVED_IMAGES`
+  - 解析类：`_journal_commands` / `_parse_journal`、`_JOURNAL` 与相关正则常量
+- `_qq_image` 不再读 AstrBot 的 media 目录，只查 debnas 自己的缓存
+- 余额面板不再读 `astrbot-src/data/cmd_config.json`，没有模型清单来源时留空
+- 删掉不再使用的 `import glob`；全仓只剩 CHANGELOG 历史记录还提到 AstrBot / NapCat
+
+### 安全
+
+- 恢复 0.1.0 安全审查里被回退的几处修复：
+  - `portal_redeploy` 重新固定只跑部署时发布的 `/deploy.sh`，并恢复 sudo 组校验；
+    客户端再传 `source` 也不会指向任意目录里的 `deploy-web.sh`（原先是本地提权）
+  - 余额块恢复 endpoint 脱敏、不下发密钥来源路径，密钥尾号只在长度 ≥12 时显示，
+    手动刷新恢复 5 秒下限
+  - `VERSION` 注入 HTML 时恢复 JSON 转义（`<` → `\u003c`），静态目录前缀校验补回
+    分隔符
+  - 恢复 `deploy-web.sh` 等 6 个脚本的 `100755` 执行位（0.2.x 改动中掉成了 `100644`），
+    新增的 `install-navidrome.sh` 也按 `0755` 入库
+  - 复核 QQ 媒体代理新增的 `?u=` 远程链接：只放行 `qpic.cn` / `qq.com` / `qq.com.cn`
+
+### 文档
+
+- README 按 0.2.6 现状重写：QQ 消息改 OneBot + SnowLuma，补 Navidrome 音乐库、
+  环境变量表、备份路径、安全说明与排错表
+- README / NOTICE / systemd 描述里的项目自称统一为 `my-debnas`（上游仍称 DebNAS）
+
+### 验证
+
+- `py_compile` 通过
+- QQ 消息 93 条正常；图片（217 KB）、表情包、系统表情代理都还能取
+- 余额查询正常（providers=1）
+- `node --check` / `bash -n` 通过；`git diff --summary` 无模式变更
+
+## 2026-11-12（修复群聊空白，版本 0.2.5）
+
+### 修复
+
+- **群聊标签空白、私聊正常**：0.2.4 首页和左栏会同时请求同一个 RPC，两条线程各自去拉
+  OneBot 历史；群那条请求（50 条约 1.5 秒）在高并发下容易超时，整个群被跳过。随后合并
+  逻辑只补「最近 5 秒」的桥接缓存，群聊消息是几天前的，于是被整段过滤掉
+- **串行化**：加 `_QQ_HISTORY_LOCK`，同一时刻只允许一个线程刷新，锁内再查一次缓存
+- **按会话回退**：记录本次成功覆盖的会话 `covered`；没覆盖到的会话整段用
+  `social-v2.json` 兜底，单次超时不会再让某个会话消失
+- **超时**：群 / 私聊历史请求从 8 秒放宽到 10 秒
+- **补群**：用 `get_group_list` 把桥接状态里还没记录的群也纳入拉取，进群后没说过话
+  也不会漏
+- 版本号 0.2.5
+
+## 2026-11-12（改名「QQ 消息」并载入最新历史，版本 0.2.4）
+
+### 变更
+
+- **标题**：左栏、首页面板、`aria-label` 从「QQ 动态」改为「QQ 消息」
+- **数据源加一层 OneBot 历史**：`get_group_msg_history` / `get_friend_msg_history`
+  每会话拉最近 50 条，带真实昵称（群名片优先）、QQ 号、消息段（文本 / 图片 / 表情 /
+  @ / 语音 / 视频占位）；私聊昵称走 `get_stranger_info`（缓存，失败不缓存空值）
+- **合并去重**：历史为主，桥接 `social-v2.json` 只补最近 5 秒内、还没进 QQ 历史的
+  本地发送；按 `message_id` 与「会话 + 方向 + 文本 + 分钟」双重去重，图片 / 表情
+  占位文本不参与比较
+- **兜底**：OneBot 不通时自动退回桥接缓存，消息栏不会空白
+- 版本号 0.2.4
+
+## 2026-11-12（QQ 消息栏显示图片 / 表情包，更新页去掉容器块，版本 0.2.3）
+
+### 新增
+
+- **QQ 动态渲染媒体**：`recentMessages` 里的图片、表情包、系统表情都显示出来
+  - 图片：按文件名调 OneBot `get_image` 换一条未过期链接再下载，字节按文件名缓存
+    （消息里的 rkey 几十分钟就失效，实测 `retcode -5503007`）
+  - 表情包：`[表情包:描述]` 回查 `stickers.json` 的 `p.qpic.cn` 链接
+  - 系统表情：读 SnowLuma 容器卷里的 `sys-face-catalog.json`
+  - `/api/qqmedia` 新增 `kind=sticker` 与 `?u=` 远程链接；只放行
+    `qpic.cn` / `qq.com` / `qq.com.cn`，按 URL 哈希或文件名落盘缓存
+- **前端 `qqText`**：媒体有图时去掉 `[图片]` / `[表情包:…]` 占位；表情包用
+  `qq-sticker` 96px 展示，多图最多 4 张，加载失败回退占位符
+
+### 移除
+
+- **更新页「组件」块里的 SnowLuma 容器行**：镜像、状态、查看口令一起删掉，
+  连同 `API.containers` / `API.vncPassword` 的前端调用与 `data-vnc` 处理
+- 上一条已经拿掉的「拉取镜像」不再重复
+
+### 文档
+
+- README 的更新页、QQ 动态、API 表三节按现状改写；版本号 0.2.3
+
+## 2026-11-12（QQ 消息栏改接 SnowLuma，移除镜像拉取，版本 0.2.2）
+
+### 变更
+
+- **QQ 动态数据源**：不再读已被删除的 AstrBot `history.jsonl`，改读
+  `~/fish/qq-bridge/state/social-v2.json` 的 `conversations[*].recentMessages` ——
+  reserved2 模式按会话保留最近收发消息，带发送者、QQ 号、毫秒时间；图片 / 表情
+  只留 `[图片]` / `[表情包:…]` 占位，不再代理会过期的 QQ CDN
+- **`rpc_qq`** 改调 `_snowluma_live_feed()`，输出字段（chat / dir / who / uin / ts /
+  text / media）保持不变，前端零改动
+- **更新页去掉「拉取镜像」**：删掉组件行里的按钮、点击处理、`API.pullImage`、
+  `rpc_pull` 与 `pull` 路由
+- README 的 QQ 动态、环境变量、排障三节按新数据源改写；版本号 0.2.2
+
+## 2026-11-12（重新接入 SnowLuma / noVNC，版本 0.2.1）
+
+QQ 机器人从 AstrBot + NapCat 切回 SnowLuma + qq-bridge 后，控制台的应用卡片和
+「凭据」页还指着已经删掉的 AstrBot / NapCat，这一版按现状改回来。
+
+### 变更
+
+- **应用卡片**：`APP_DEFS` 去掉 AstrBot（6185）/ NapCat（6099），加回 SnowLuma（5099），
+  noVNC（6081）保留；两张卡都按容器名 / 发布端口 / 页面标题自动识别
+- **凭据页**：换成三张卡 —— SnowLuma 控制台、noVNC 远程桌面、OneBot 接口，
+  沿用原来的 `credCard` / `credRow` 布局（地址、口令、登录方式、复制 / 显示）
+- **凭据来源**：不再读 `~/.config/debnas-web/credentials.json`（AstrBot 密码已失效），
+  改为每次请求实时读 rootless podman 卷里的 `config/vnc-password`、
+  `config/onebot.json` 的 `accessToken`、`config/webui.json`；
+  `DEBNAS_SNOWLUMA_DATA` 可以指向别的数据目录
+- **`rpc_apps`**：删掉 AstrBot / NapCat 的兜底探测（进程已不存在）
+
+### 文档
+
+- README 的应用卡片、凭据页两节按现状改写；版本号 0.2.1
+
+## 2026-11-11（Navidrome 音乐库，版本 0.2.0）
+
+首页多一块「音乐库」，把本机原生部署的 Navidrome 接进控制台。没有用容器，
+服务以 NAS 账号的 systemd 用户单元常驻。
+
+### 新增
+
+- **音乐库横条**：状态（运行中 / 扫描中 / 已停止 / 启动失败 / 未安装）、
+  曲目 / 专辑 / 艺人 / 占用、音乐目录、最近扫描时间、版本；按钮是打开、重启、停止 / 启动
+- **`rpc_music`**：只读打开 `~/navidrome/data/navidrome.db` 的 `library` 表拿统计，
+  不碰 Navidrome 的登录态；服务状态走 `systemctl --user is-active`，root 常驻时用
+  `sudo -u <运行账号>` 切到目标用户的会话总线
+- **`rpc_music_action`**：只接受 `start` / `stop` / `restart`，参数非法直接拒绝
+- **应用列表认原生服务**：以前只枚举 podman 容器，原生服务永远进不了「应用」；
+  现在 `rpc_apps` 额外探测本机常驻端口（Navidrome 4533），端口在听就出卡片
+- **`install-navidrome.sh`**：按 x86_64 拉官方 `linux_amd64.tar.gz`（默认 gh-proxy
+  镜像，`DEBNAS_GH_PROXY` 可覆盖），核对大小、解压、写配置和用户单元、开 linger，
+  已有配置不覆盖；`--check` 只看不装
+- `deploy-web.sh` 把 `install-navidrome.sh` 一起打进 `/deploy.sh` 安装器，并复制到
+  `/usr/local/lib/debnas-portal/`
+
+### 改动
+
+- **首页重排**：
+  - 应用改成通栏，卡片按 280px 自适应列：桌面 3 张一行，≤980px 两列，≤560px 单列
+  - 音乐库从整块统计卡改成横向媒体条：图标 + 状态 + 一行曲库统计 + 右侧操作，
+    空库提示收成一条小字
+  - 最近共享 / 网络流量 / 功耗 并成一行三栏（≤980px 两栏、≤720px 单栏），
+    图表跟着面板等高拉伸
+  - 去掉 `.home-grid` / `.col-main` / `.col-side` 的双栏骨架
+- `APP_DEFS` 增加 Navidrome（4533、音乐图标、`icons/navidrome.svg`）
+- `api-web.js` 增加 `music()` / `musicAction(action)`
+- 环境变量：`DEBNAS_NAVIDROME_PORT` / `_HOME` / `_BIN` / `_DB`
+- 版本号 0.1.0 → 0.2.0
+
+### 说明
+
+- 曲库统计只认本机 SQLite；换成 PostgreSQL 时面板只显示运行状态
+- 面板不提供曲库管理（用户、播放列表、转码），这些仍在 Navidrome 自己的界面里
+
 ## 2026-11-10（版本基线 0.1.0）
 
 仓库原来没有版本号，`/usr/share/cockpit/debnas-portal/VERSION` 那是旧 Cockpit
@@ -28,22 +196,6 @@
   在 `index.html` 的 `<head>` 里注入 `window.__DEBNAS_BUILD="0.1.0"`，前端再拿
   `info.version` 兜一层，彻底不会出现 `dev`
 
-### 安全与隐私（同批修复）
-
-- 新增的 QQ 动态字段不再带作者 QQ 号 / 人设名默认值，统一走
-  `DEBNAS_QQ_BOT_UIN` / `DEBNAS_QQ_OWNER` / `DEBNAS_QQ_BOT_NAME` /
-  `DEBNAS_QQ_OWNER_NAME`（默认「机器人」「我」）；顺手把 `owner` 的读取挪出循环，
-  历史日志全无效时不会 NameError
-- `rpc_portal_redeploy` 删掉客户端可传的 `source` 参数：原来能指向任意目录里的
-  `deploy-web.sh` 再以 root 执行，属于本地提权；现在只跑部署时发布的 `/deploy.sh`，
-  并要求会话属于 sudo 组
-- 多厂商余额块沿用 endpoint 脱敏，不下发密钥来源文件路径，密钥尾号只在长度 ≥12
-  时显示；手动刷新保持 5 秒下限
-- `serve_static()` 注入 `window.__DEBNAS_BUILD` 时按 JSON 字符串转义；静态目录的
-  前缀校验补上路径分隔符，避免 `/…/static-evil` 命中
-- README 的安全一节改写：明确「文件页 / 下载 / 上传 / `file_read` 都以 root 操作
-  任意路径」，补登录限速、HTTP 明文、供应链和头像外链的说明
-
 ## 2026-11-10（群成员自动嗅探）
 
 ### 新增
@@ -51,10 +203,10 @@
 - **群成员头像自动嗅探**：插件启动 8 秒后调一次 NapCat 的 `get_group_member_list`，
   把「群名片 / 昵称 → QQ 号」写进 `plugin_data/astrbot_plugin_feiyu/members.json`；
   之后有群消息、且距上次超过一小时，再静默嗅一次
-- 实测一次就拿到 8 条映射，包括从来没说过话的群成员，
+- 实测一次就拿到 8 条映射，包括「光之锯人」这种从来没说过话的成员，
   不用等谁开口，也不用在代码里写死 QQ 号
 - debnas 侧 `_astrbot_feed()` 读这张表补 `uin`，优先级：
-  `history.jsonl` 里的 `uid`（最准）→ `members.json` → `@昵称(QQ号)` → 配置的显示名
+  `history.jsonl` 里的 `uid`（最准）→ `members.json` → `@昵称(QQ号)` → `爸爸/大肥鱼` 固定值
 
 ## 2026-11-10（群聊成员头像）
 
@@ -63,7 +215,7 @@
 - 群聊里每个人的真实头像：插件写 `history.jsonl` 时多记一个 `uid`（发送者 QQ 号），
   debnas 用它拼 `q1.qlogo.cn` 的头像 URL；私聊本来就有号，这次一起统一了
 - 老记录没有 `uid`，用消息文本里的 `@昵称(QQ号)` 反推一个「名字 → QQ 号」的映射
-  兜底，所以今天之前的聊天记录也能显示头像（群里已经能对上多个昵称）
+  兜底，所以今天之前的聊天记录也能显示头像（妃爱 / 迪迦奥特曼 / 爸爸 都对上了）
 - 头像加载失败（内网访问不到 qlogo）会自己退回首字方块，不会留一个破图
 
 ## 2026-11-10（会话库不再自己造条目 + 静态资源指纹）

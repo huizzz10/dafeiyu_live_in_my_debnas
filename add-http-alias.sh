@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 给当前局域网接口加一个备用 IPv4 地址，专供手机 HTTP 访问。
-# 用途：某台手机把主机的 HTTP 缓存成 HSTS/HTTPS-only，
+# 用途：某台手机把 192.168.100.142 的 HTTP 缓存成 HSTS/HTTPS-only，
 # 换一个新 IP 就是新的 origin，不会再被升级。
 set -euo pipefail
 
@@ -23,7 +23,7 @@ if ip -4 addr show dev "$DEV" | grep -q "inet $ALIAS/"; then
 fi
 
 if ping -c 1 -W 1 "$ALIAS" >/dev/null 2>&1; then
-  echo "$ALIAS 已经被占用，换一个地址：sudo $0 $BASE.251" >&2
+  echo "$ALIAS 已经被占用，换一个地址：sudo $0 192.168.100.251" >&2
   exit 1
 fi
 

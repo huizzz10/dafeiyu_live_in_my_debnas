@@ -30,7 +30,7 @@ for arg in "$@"; do
 done
 
 [[ $EUID -eq 0 ]] || { echo "请用 sudo 运行"; exit 1; }
-[[ "$(uname -m)" == "x86_64" ]] || { echo "my-DebNAS 只支持 x86_64，当前架构：$(uname -m)" >&2; exit 1; }
+[[ "$(uname -m)" == "x86_64" ]] || { echo "my-debnas 只支持 x86_64，当前架构：$(uname -m)" >&2; exit 1; }
 [[ -d "$HERE/web/frontend" ]] || { echo "缺少 web/frontend/"; exit 1; }
 
 if [[ $SKIP_DEPS -eq 0 ]]; then
@@ -97,7 +97,7 @@ DEPLOY_SH=$(mktemp /tmp/debnas-installer.XXXXXX)
 {
   cat <<'DEBNAS_HEADER'
 #!/bin/bash
-# DebNAS 一键部署：
+# debnas 一键部署：
 #   curl -fsSLk https://<主机>/deploy.sh | sudo bash
 set -euo pipefail
 [[ $EUID -eq 0 ]] || { echo "请用 sudo 运行" >&2; exit 1; }
@@ -105,7 +105,7 @@ TMP=$(mktemp -d /tmp/debnas-src.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 base64 -d <<'DEBNAS_TARBALL'
 DEBNAS_HEADER
-  tar -C "$HERE" -czf - deploy-web.sh install-deps.sh install-mihomo.sh LICENSE NOTICE web | base64 -w 76
+  tar -C "$HERE" -czf - deploy-web.sh install-deps.sh install-mihomo.sh install-navidrome.sh LICENSE NOTICE web | base64 -w 76
   cat <<'DEBNAS_FOOTER'
 DEBNAS_TARBALL
 cd "$TMP"
@@ -119,7 +119,7 @@ echo "    已发布 ${STATIC}/deploy.sh"
 echo "==> 2/5 后端助手脚本"
 install -m 0755 "$HERE/web/helpers/samba.py" "$HERE/web/helpers/power_sampler.py" \
   "$HERE/web/helpers/autoupdate.sh" "$HERE/web/helpers/vncpass.sh" \
-  "$HERE/install-mihomo.sh" "$LIB/"
+  "$HERE/install-mihomo.sh" "$HERE/install-navidrome.sh" "$LIB/"
 
 echo "==> 3/5 采样服务"
 install -m 0644 "$HERE/web/helpers/debnas-power.service" "$POWER_UNIT"

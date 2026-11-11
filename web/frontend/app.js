@@ -9,6 +9,7 @@
     users: [],
     info: null,
     qqScope: "group",  // 左栏看哪个会话：group | private，下面从 localStorage 覆盖
+    music: null,
     loading: false
   };
 
@@ -24,7 +25,7 @@
     network: { title: "网络", sub: "接口与地址" },
     services: { title: "服务", sub: "运行中的 systemd 服务" },
     updates: { title: "更新", sub: "系统补丁、组件与历史记录" },
-    credentials: { title: "登录凭据", sub: "AstrBot / NapCat 面板入口（仅登录后可见）" },
+    credentials: { title: "登录凭据", sub: "SnowLuma / noVNC / OneBot 入口（仅登录后可见）" },
     vms: { title: "虚拟机", sub: "创建、启停、快照与网页控制台" },
     logs: { title: "日志", sub: "journalctl 实时日志" },
     terminal: { title: "终端", sub: "以当前账号执行命令" },
@@ -62,7 +63,8 @@
     drive: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h.01M11 15h.01M15 15h.01M17 15h2"/>',
     chevron: '<path d="m9 6 6 6-6 6"/>',
     swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
-    power: '<path d="M12 3v9"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/>'
+    power: '<path d="M12 3v9"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/>',
+    music: '<path d="M9 18V5.5l10-2V15.5"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="15.5" r="3"/>'
   };
 
   function icon(name, size) {
@@ -395,6 +397,7 @@
     live.appTimer = setInterval(function () {
       if (document.hidden || state.view !== "home") return;
       once("apps", refreshAppsPanel);
+      once("music", refreshMusicPanel);
     }, 30000);
   }
 
@@ -532,7 +535,7 @@
     live.mihomoTimer = setInterval(function () { if (!document.hidden) once("mihomo", pollMihomo); }, 12000);
   }
 
-  /* ---------------- API 余额块 ---------------- */
+  /* ---------------- DeepSeek 余额块 ---------------- */
   var DS_TITLE = "鲸鲸的零花钱";
 
   function deepseekOpen() {
@@ -905,42 +908,39 @@
           null, ready ? diskPct : null) +
       "</section>" +
 
-      '<section class="home-grid">' +
-        '<div class="col-main">' +
-          renderApps() +
-          // 左栏能显示时就不再画首页那块面板，同一份数据只渲染一次
-          (feedInGutter() ? "" : renderQq()) +
-          '<section class="panel">' +
-            '<div class="panel-head"><h3>最近共享</h3>' +
-          '<button class="btn btn-text" data-nav="shares">查看全部</button></div>' +
-        (state.shares.length
-          ? '<ul class="share-list">' + state.shares.slice(0, 3).map(function (s) {
-              return '<li><span class="share-icon">' + icon("folder", 13) + "</span>" +
-                '<b>' + esc(s.name) + "</b>" +
-                '<span class="muted mono">' + esc(s.path || "—") + "</span>" +
-                '<span class="chip ' + (s.readOnly ? "chip-muted" : "chip-accent") + '">' +
-                (s.readOnly ? "只读" : "读写") + "</span></li>";
-            }).join("") + "</ul>"
-          : emptyBlock("还没有共享目录", "去文件共享页新建一个")) +
-          "</section>" +
-        "</div>" +
-        '<div class="col-side">' +
-      '<section class="live-grid">' +
-        '<div class="panel live-card">' +
+      renderApps() +
+      renderMusic() +
+
+      '<section class="dash-row">' +
+        '<section class="panel">' +
+          '<div class="panel-head"><h3>最近共享</h3>' +
+        '<button class="btn btn-text" data-nav="shares">查看全部</button></div>' +
+      (state.shares.length
+        ? '<ul class="share-list">' + state.shares.slice(0, 3).map(function (s) {
+            return '<li><span class="share-icon">' + icon("folder", 13) + "</span>" +
+              '<b>' + esc(s.name) + "</b>" +
+              '<span class="muted mono">' + esc(s.path || "—") + "</span>" +
+              '<span class="chip ' + (s.readOnly ? "chip-muted" : "chip-accent") + '">' +
+              (s.readOnly ? "只读" : "读写") + "</span></li>";
+          }).join("") + "</ul>"
+        : emptyBlock("还没有共享目录", "去文件共享页新建一个")) +
+        "</section>" +
+        '<section class="panel live-card">' +
           '<div class="panel-head"><div class="panel-title"><h3>网络流量</h3></div>' +
             '<div class="live-stats"><span class="chip chip-accent" id="net-rx">↓ 0 B/s</span>' +
             '<span class="chip chip-muted" id="net-tx">↑ 0 B/s</span></div></div>' +
           '<div class="live-body"><canvas id="net-chart" class="spark"></canvas></div>' +
-        "</div>" +
-        '<div class="panel live-card">' +
+        "</section>" +
+        '<section class="panel live-card">' +
           '<div class="panel-head"><div class="panel-title"><h3>功耗</h3></div>' +
             '<div class="live-stats"><span class="chip chip-accent" id="pw-cpu">CPU — W</span>' +
             '<span class="chip chip-muted" id="pw-bat">电池 —</span></div></div>' +
           '<div class="live-body"><canvas id="pw-chart" class="spark"></canvas></div>' +
-        "</div>" +
+        "</section>" +
       "</section>" +
-        "</div>" +
-      "</section>";
+
+      // 左栏能显示时就不再画首页那块面板，同一份数据只渲染一次
+      (feedInGutter() ? "" : renderQq());
   }
 
   function statCard(label, value, sub, nav, pct) {
@@ -1138,12 +1138,12 @@
 
   /* 应用按容器自动检测：容器名 / 发布端口 / 页面标题命中才算存在，没有就不显示 */
   var APP_DEFS = [
-    { id: "astrbot", name: "AstrBot", host: "astrbot", ports: [6185],
-      icon: "chat", desc: "AstrBot 控制台" },
-    { id: "napcat", name: "NapCat", host: "napcat", ports: [6099],
-      icon: "chat", desc: "QQ 协议端面板" },
+    { id: "snowluma", name: "SnowLuma", host: "snowluma", ports: [5099],
+      img: "./icons/snowluma.svg", icon: "chat", desc: "QQ 控制台 · 登录与 OneBot" },
     { id: "novnc", name: "noVNC", match: /novnc|vnc/i, ports: [6081],
-      img: "./icons/novnc.png", icon: "monitor", desc: "远程桌面（VNC）" }
+      img: "./icons/novnc.png", icon: "monitor", desc: "远程桌面（VNC）" },
+    { id: "navidrome", name: "Navidrome", host: "navidrome", ports: [4533],
+      img: "./icons/navidrome.svg", icon: "music", desc: "音乐库 · 流媒体" }
   ];
 
   function appUrl(port) {
@@ -1217,8 +1217,104 @@
       (total
         ? '<div class="app-list">' + cards + extraCards + "</div>"
         : emptyBlock(scanning ? "正在检测应用…" : "没有检测到应用",
-            scanning ? "读取容器发布端口…" : "容器发布端口后会自动出现在这里")) +
+            scanning ? "读取容器发布端口…" : "容器或本机服务启动后会自动出现在这里")) +
       "</section>";
+  }
+
+
+  /* ---------------- 音乐库（Navidrome） ---------------- */
+  function fmtAgo(sec) {
+    if (!sec) return "—";
+    var d = Math.max(0, Math.floor(Date.now() / 1000) - sec);
+    if (d < 60) return "刚刚";
+    if (d < 3600) return Math.floor(d / 60) + " 分钟前";
+    if (d < 86400) return Math.floor(d / 3600) + " 小时前";
+    return Math.floor(d / 86400) + " 天前";
+  }
+
+  function musicVersion(v) {
+    // 后端给的是 "0.64.2 (10114574)"，只留版本号
+    var t = String(v || "").trim().split(/\s+/)[0];
+    return t ? (/^v/i.test(t) ? t : "v" + t) : "";
+  }
+
+  function musicChip(m) {
+    var lib = m.library || {};
+    if (!m.installed) return '<span class="chip chip-muted">未安装</span>';
+    if (lib.scanning) return '<span class="chip chip-accent">扫描中</span>';
+    if (m.state === "active") return '<span class="chip chip-accent">运行中</span>';
+    if (m.state === "failed") return '<span class="chip chip-muted">启动失败</span>';
+    return '<span class="chip chip-muted">已停止</span>';
+  }
+
+  function renderMusic() {
+    var m = state.music;
+    if (!m) {
+      return '<section class="panel media-panel" id="music-panel"><div class="media-bar">' +
+        '<div class="media-art">' + icon("music", 22) + "</div>" +
+        '<div class="media-main"><div class="media-top"><b>Navidrome</b>' +
+          '<span class="chip chip-muted">检测中</span></div>' +
+          '<div class="media-meta"><span>正在读取音乐库…</span></div></div>' +
+        "</div></section>";
+    }
+    var lib = m.library || {};
+    var folder = lib.folder || "~/music";
+    var live = m.active;
+    var hasLib = m.installed && m.library;
+    var art = '<div class="media-art' + (live ? "" : " off") + '">' + icon("music", 22) + "</div>";
+    var stats = hasLib
+      ? '<span class="media-stat"><b>' + esc(lib.songs == null ? "—" : String(lib.songs)) + "</b> 曲目</span>" +
+        '<span class="media-stat"><b>' + esc(lib.albums == null ? "—" : String(lib.albums)) + "</b> 专辑</span>" +
+        '<span class="media-stat"><b>' + esc(lib.artists == null ? "—" : String(lib.artists)) + "</b> 艺人</span>" +
+        '<span class="media-stat"><b>' + esc(lib.size ? fmtBytes(lib.size / 1024) : "—") + "</b> 占用</span>"
+      : "";
+    var meta = "";
+    if (hasLib) {
+      meta = stats +
+        '<span class="media-path">目录 <code>' + esc(folder) + "</code></span>" +
+        (lib.lastScan ? "<span>最近扫描 " + esc(fmtAgo(lib.lastScan)) + "</span>" : "");
+    } else if (m.installed) {
+      meta = "<span>曲库还没初始化，启动后会自动创建</span>";
+    }
+    var actions = "";
+    if (m.installed && live) {
+      actions = '<button class="btn btn-text" data-music="restart">重启</button>' +
+        '<button class="btn btn-text" data-music="stop">停止</button>' +
+        '<button class="btn btn-primary" data-open="' + m.port + '">打开</button>';
+    } else if (m.installed) {
+      actions = '<button class="btn btn-primary" data-music="start">启动</button>';
+    }
+    var hint = "";
+    if (!m.installed) {
+      hint = "还没安装 Navidrome：跑一下 <code>install-navidrome.sh</code>，装好会自动出现在这里";
+    } else if (!live) {
+      hint = "服务没有运行，点「启动」就能恢复";
+    } else if (!lib.songs) {
+      hint = "曲库还空着：把音乐放进 <code>" + esc(folder) + "</code>，每分钟自动扫描";
+    }
+    return '<section class="panel media-panel" id="music-panel">' +
+      '<div class="media-bar">' + art +
+        '<div class="media-main">' +
+          '<div class="media-top"><b>Navidrome</b>' + musicChip(m) +
+            (m.version ? '<span class="media-ver">' + esc(musicVersion(m.version)) + "</span>" : "") +
+          "</div>" +
+          '<div class="media-meta">' + meta + "</div>" +
+        "</div>" +
+        (actions ? '<div class="media-actions">' + actions + "</div>" : "") +
+      "</div>" +
+      (hint ? '<div class="media-hint">' + hint + "</div>" : "") +
+      "</section>";
+  }
+
+  function refreshMusicPanel() {
+    if (document.hidden) return Promise.resolve();
+    return API.music().then(function (d) {
+      state.music = d;
+      if (state.view === "home") {
+        var el = $("#music-panel");
+        if (el) el.outerHTML = renderMusic();
+      }
+    }).catch(function () {});
   }
 
 
@@ -1260,36 +1356,44 @@
         emptyBlock("正在读取…", "这个页面需要登录后才能查看") + "</section>";
     }
     var host = location.hostname || "localhost";
-    var ab = c.astrbot || {};
-    var nc = c.napcat || {};
-    var abUrl = "http://" + host + ":" + (ab.port || 6185);
-    var ncBase = "http://" + host + ":" + (nc.port || 6099) + "/webui";
-    var ncUrl = ncBase + (nc.token ? "?token=" + encodeURIComponent(nc.token) : "");
-    var astro = credCard({
-      name: "AstrBot", desc: "AstrBot 控制台 · 聊天、插件与日志", icon: "chat",
-      action: "打开控制台", url: abUrl, online: ab.online !== false,
-      rows: credRow("地址", abUrl) +
-        credRow("用户名", ab.username || "astrbot") +
-        credRow("密码", ab.password || "（未配置）", true) +
-        credRow("登录", "账号 + 密码", false, false)
+    var sl = c.snowluma || {};
+    var nv = c.novnc || {};
+    var ob = c.onebot || {};
+    var slUrl = "http://" + host + ":" + (sl.port || 5099) + "/";
+    var nvUrl = "http://" + host + ":" + (nv.port || 6081) + "/vnc.html";
+    var obUrl = "http://" + host + ":" + (ob.port || 3000) + "/";
+    var wsUrl = "ws://" + host + ":" + (ob.wsPort || 3001) + "/";
+    var snow = credCard({
+      name: "SnowLuma", desc: "QQ 控制台 · 账号、OneBot 与日志", icon: "chat",
+      action: "打开控制台", url: slUrl, online: sl.online !== false,
+      rows: credRow("地址", slUrl) +
+        (sl.password ? credRow("密码", sl.password, true) : "") +
+        credRow("登录", sl.password ? "密码" : "无需密码 · 仅内网", false, false)
     });
-    var napcat = credCard({
-      name: "NapCat", desc: "QQ 协议端 · 登录态与 OneBot 配置", icon: "server",
-      action: "打开面板", url: ncUrl, online: nc.online !== false,
-      rows: credRow("地址", ncBase) +
-        credRow("Token", nc.token || "（未读到 webui.json）", true) +
-        credRow("协议", "OneBot v11 · 反向 WS 6199", false, false) +
-        credRow("登录", "带 token 直接进入", false, false)
+    var vnc = credCard({
+      name: "noVNC", desc: "远程桌面 · SnowLuma 的虚拟屏幕", icon: "monitor",
+      action: "打开远程桌面", url: nvUrl, online: nv.online !== false,
+      rows: credRow("地址", nvUrl) +
+        credRow("口令", nv.password || "（未读到 vnc-password）", true) +
+        credRow("登录", "VNC 口令（无用户名）", false, false)
+    });
+    var onebot = credCard({
+      name: "OneBot", desc: "协议端接口 · qq-bridge 接入用", icon: "server",
+      action: "打开接口", url: obUrl, online: ob.online !== false,
+      rows: credRow("HTTP", obUrl) +
+        credRow("WebSocket", wsUrl) +
+        credRow("Token", ob.token || "（未读到 onebot.json）", true) +
+        credRow("登录", "Access-Token", false, false)
     });
     return '<div class="cred-page">' +
-      '<div class="cred-grid">' + astro + napcat + "</div>" +
-      '<div class="cred-note">AstrBot 密码保存在 <code>~/.config/debnas-web/credentials.json</code>' +
-      '（权限 0600），改了面板密码记得同步改这里；NapCat token 每次从 ' +
-      '<code>webui.json</code> 实时读取。</div>' +
+      '<div class="cred-grid">' + snow + vnc + onebot + "</div>" +
+      '<div class="cred-note">口令与令牌实时读自 SnowLuma 容器的 ' +
+      '<code>config/vnc-password</code>、<code>config/onebot.json</code>，改完重启对应服务生效；' +
+      'OneBot 令牌同时供 <code>qq-bridge</code> 使用。</div>' +
       "</div>";
   }
 
-  /* ---------------- QQ 动态 ---------------- */
+  /* ---------------- QQ 消息 ---------------- */
   function qqAvatarHtml(m) {
     var out = m.dir === "out";
     var who = String(m.who || "?").trim();
@@ -1331,21 +1435,27 @@
   function qqText(m) {
     var text = String(m.text || "");
     var media = Array.isArray(m.media) ? m.media.filter(function (x) {
-      return x && x.file;
+      return x && (x.file || x.url);
     }) : [];
-    if (media.length) text = text.replace(/\[图片\]/g, "").trim();
+    if (media.length) {
+      text = text.replace(/\[图片\]/g, "").replace(/\[表情包:[^\]]*\]/g, "").trim();
+    }
     var html = esc(text).replace(/\[表情(\d+)\]/g, function (_, id) {
       return qqFaceImg(id, "inline");
     });
     if (media.length) {
-      html += '<div class="qq-media">' + media.slice(0, 4).map(function (item) {
-        var file = String(item.file || "").replace(/[^A-Za-z0-9._-]/g, "");
-        if (!file) return "";
-        return '<span class="qq-media-item"><img class="qq-image" src="/api/qqmedia?kind=image&amp;file=' +
-          encodeURIComponent(file) + '" alt="[图片]" loading="lazy" decoding="async" ' +
-          'onerror="this.parentNode.classList.add(\'broken\');this.remove()" />' +
-          '<span class="qq-media-fallback">[图片]</span></span>';
-      }).join("") + "</div>";
+      var allSticker = media.every(function (x) { return x.kind === "sticker"; });
+      html += '<div class="qq-media' + (allSticker ? " stickers" : "") + '">' +
+        media.slice(0, 4).map(function (item) {
+          var sticker = item.kind === "sticker";
+          var src = "/api/qqmedia?kind=" + (sticker ? "sticker" : "image");
+          if (item.file) src += "&amp;file=" + encodeURIComponent(item.file);
+          if (item.url) src += "&amp;u=" + encodeURIComponent(item.url);
+          return '<span class="qq-media-item"><img class="' + (sticker ? "qq-sticker" : "qq-image") +
+            '" src="' + src + '" alt="' + (sticker ? "[表情]" : "[图片]") + '" loading="lazy" decoding="async" ' +
+            'onerror="this.parentNode.classList.add(\'broken\');this.remove()" />' +
+            '<span class="qq-media-fallback">' + (sticker ? "[表情]" : "[图片]") + "</span></span>";
+        }).join("") + "</div>";
     }
     return html || '<span class="muted">（空）</span>';
   }
@@ -1370,7 +1480,7 @@
     return window.matchMedia("(min-width: 1400px)").matches;
   }
 
-  // ---------------- QQ 动态 ----------------
+  // ---------------- QQ 消息 ----------------
   // 群聊和私聊是两条独立的流，各自按时间从早到晚排，不再交叉。
   function qqScopeOf(m) {
     return String((m && m.chat) || "").indexOf("group:") === 0 ? "group" : "private";
@@ -1443,7 +1553,7 @@
 
   function renderGutterChat() {
     var list = feedCanonical(40);
-    var head = '<div class="gutter-head"><span>QQ 动态</span><span class="pulse"></span>' +
+    var head = '<div class="gutter-head"><span>QQ 消息</span><span class="pulse"></span>' +
       qqScopeTabs() + "</div>";
     if (!list.length) {
       return head + '<div class="gchat"><div class="gchat-empty">' +
@@ -1456,7 +1566,7 @@
   function renderQq() {
     var list = feedCanonical(8);
     var scopeName = qqScope() === "group" ? "群聊" : "私聊";
-    var head = '<div class="panel-head"><div class="panel-title"><h3>QQ 动态</h3>' +
+    var head = '<div class="panel-head"><div class="panel-title"><h3>QQ 消息</h3>' +
       '<span class="muted">' + scopeName + " · 最近 " + list.length + " 条</span></div>" +
       '<span class="chip chip-accent"><span class="pulse"></span>实时</span></div>' +
       qqScopeTabs();
@@ -2690,7 +2800,6 @@
     var apt = state.apt || { count: 0, packages: [] };
     var auto = state.autoUpgrade;
     var portal = state.portal || {};
-    var ctrs = state.containers || [];
     var log = state.aptLog || [];
     var out = [];
 
@@ -2751,13 +2860,6 @@
         '<span class="muted small">' + (portal.deployed ? "部署于 " + esc(portal.deployed.slice(5, 16).replace("T", " ")) : "本地源码") + "</span>" +
         '<button class="btn btn-text" id="redeploy">重新部署</button></div>');
     }
-    ctrs.forEach(function (c) {
-      rows.push('<div class="comp-row"><div class="comp-main"><b>' + esc(c.name) + "</b>" +
-        '<span class="muted mono">' + esc(c.image) + "</span></div>" +
-        '<span class="chip chip-muted">' + esc(c.status) + "</span>" +
-        '<button class="btn btn-text" data-pull="' + esc(c.image) + '">拉取镜像</button>' +
-        '<button class="btn btn-text" data-vnc="' + esc(c.name) + '">查看口令</button></div>');
-    });
     if (rows.length) {
       out.push('<section class="panel"><div class="panel-head"><div class="panel-title">' +
         '<h3>组件</h3><span class="muted">' + rows.length + " 个</span></div></div>" +
@@ -3682,6 +3784,7 @@
       // 应用探测和 QQ 日志都可能慢（podman / curl / 24h 日志），放到后台更新面板，
       // 不阻塞首页首屏；先到先渲染，晚到的直接替换对应面板。
       if (!state.webAt || Date.now() - state.webAt > 30000) once("apps", refreshAppsPanel);
+      once("music", refreshMusicPanel);
       once("qq", pollQq);
     } else if (state.view === "shares") {
       jobs.push(API.listShares().then(function (s) { state.shares = s; }));
@@ -3720,7 +3823,6 @@
       jobs.push(API.aptSim().then(function (a) { state.apt = a; }));
       jobs.push(API.autoUpgradeGet().then(function (v) { state.autoUpgrade = v; }));
       jobs.push(API.portalInfo().then(function (i) { state.portal = i; }));
-      jobs.push(API.containers().then(function (c) { state.containers = c; }));
       jobs.push(API.aptHistory().then(function (h) { state.aptLog = h; }));
     }
     return Promise.all(jobs).then(render).catch(function (e) {
@@ -4296,6 +4398,22 @@
       var open = e.target.closest("[data-open]");
       if (open) window.open(appUrl(open.dataset.open), "_blank", "noopener");
 
+      var mact = e.target.closest("[data-music]");
+      if (mact) {
+        var verb = mact.dataset.music;
+        var label = verb === "restart" ? "重启" : verb === "stop" ? "停止" : "启动";
+        mact.disabled = true;
+        API.musicAction(verb)
+          .then(function () {
+            toast("已" + label + "音乐服务", "success");
+            setTimeout(function () { once("music", refreshMusicPanel); }, 1200);
+          })
+          .catch(function (err) {
+            mact.disabled = false;
+            toast("操作失败：" + err, "error");
+          });
+      }
+
       if (e.target.id === "save-global") {
         var payload = {};
         $$("[data-key]").forEach(function (inp) { payload[inp.dataset.key] = inp.value.trim(); });
@@ -4414,31 +4532,6 @@
             .then(function () { toast("已开始后台部署，约 5 秒后服务重启，稍后刷新页面", "success"); })
             .catch(function (err) { toast("部署失败：" + err, "error"); });
         });
-      }
-
-      var pullBtn = e.target.closest("[data-pull]");
-      if (pullBtn) {
-        var img = pullBtn.dataset.pull;
-        toast("正在拉取 " + img + "…", "info");
-        API.pullImage(img)
-          .then(function () { toast("已拉取，容器重建后生效", "success"); })
-          .catch(function (err) { toast("拉取失败：" + err, "error"); });
-        return;
-      }
-
-      var vncBtn = e.target.closest("[data-vnc]");
-      if (vncBtn) {
-        var cname = vncBtn.dataset.vnc;
-        toast("正在读取口令…", "info");
-        API.vncPassword((state.user || {}).name, cname).then(function (r) {
-          if (r && r.password) {
-            toast("noVNC 口令：" + r.password, "success");
-            if (navigator.clipboard) navigator.clipboard.writeText(r.password).catch(function () {});
-          } else {
-            toast("读取失败：" + ((r && r.error) || "未知错误"), "error");
-          }
-        }).catch(function (err) { toast("读取失败：" + err, "error"); });
-        return;
       }
 
       if (e.target.id === "manage-groups") groupsDialog();
@@ -4744,7 +4837,7 @@
         '<span class="swatch-check">✓</span></button>';
     }).join("");
 
-    console.log("[DebNAS] accent swatches:", ACCENTS.length, ACCENTS.join(" "));
+    console.log("[debnas] accent swatches:", ACCENTS.length, ACCENTS.join(" "));
 
     function updateAccentUI() {
       var cur = (Theme.current().accent || "").toLowerCase();

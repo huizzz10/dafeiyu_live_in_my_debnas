@@ -1,5 +1,5 @@
 [Unit]
-Description=DebNAS 功耗采样（RAPL → /run/debnas-portal/power.json）
+Description=debnas 功耗采样（RAPL → /run/debnas-portal/power.json）
 After=multi-user.target
 
 [Service]

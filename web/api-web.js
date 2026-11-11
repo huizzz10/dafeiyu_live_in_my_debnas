@@ -94,6 +94,8 @@
     appServices: function () { return rpc("apps").then(function (l) { return l; }); },
     qqFeed: function () { return rpc("qq"); },
     credentials: function () { return rpc("credentials"); },
+    music: function () { return rpc("music"); },
+    musicAction: function (action) { return rpc("music_action", { action: action }); },
     mihomo: function () { return rpc("mihomo"); },
     deepseek: function (force) { return rpc("deepseek", force ? { force: true } : {}); },
     mihomoAction: function (p) { return rpc("mihomo_action", p || {}); },
@@ -186,9 +188,7 @@
     autoUpgradeSet: function (on, schedule) { return rpc("auto_set", { enabled: !!on, schedule: schedule || "daily" }); },
     portalInfo: function () { return rpc("portal_info"); },
     containers: function () { return rpc("containers"); },
-    pullImage: function (image) { return rpc("pull", { image: image }); },
     aptHistory: function () { return rpc("apt_history"); },
-    vncPassword: function (user) { return rpc("vnc", { user: user || "" }).then(function (r) { return JSON.parse(r.out || "{}"); }); },
 
     /* 共享与 Samba 全局配置 */
     saveShare: function (p) { return rpc("samba", { verb: "save", payload: p }); },

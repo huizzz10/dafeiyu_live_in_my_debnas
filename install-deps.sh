@@ -8,7 +8,7 @@
 set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "请用 sudo 运行" >&2; exit 1; }
-[[ "$(uname -m)" == "x86_64" ]] || { echo "my-DebNAS 只支持 x86_64，当前架构：$(uname -m)" >&2; exit 1; }
+[[ "$(uname -m)" == "x86_64" ]] || { echo "my-debnas 只支持 x86_64，当前架构：$(uname -m)" >&2; exit 1; }
 REINSTALL=0
 [[ "${1:-}" == "--reinstall" ]] && REINSTALL=1
 

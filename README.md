@@ -1,4 +1,4 @@
-# my-DebNAS · Debian NAS 控制台
+# my-debnas · Debian NAS 控制台
 
 ![vibe coding](https://img.shields.io/badge/vibe_coding-AI_pair_programmed-ff69b4?style=flat-square)
 ![license](https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square)
@@ -7,8 +7,8 @@
 ![ui](https://img.shields.io/badge/ui-Material_3_Expressive-6750A4?style=flat-square)
 
 一台 Debian 13 小主机的自建 NAS 控制台：PAM 登录、Samba 共享、文件、用户与组、
-存储 / 网络 / 服务 / 日志、真实终端、apt 更新、libvirt 虚拟机 + 浏览器 VNC，
-外加 AstrBot / NapCat 的 QQ 动态与面板凭据、容器应用入口和 mihomo 管理块。
+存储 / 网络 / 服务 / 日志、真实终端、apt 更新、libvirt 虚拟机 + 浏览器 VNC、
+Navidrome 音乐库，外加 SnowLuma 的 QQ 消息与面板凭据、容器应用入口和 mihomo 管理块。
 
 界面按 **Material 3 Expressive（MD3E）** 设计，纯手写 CSS + 原生 JS。
 没有 Cockpit，没有 Node 构建，后端只用 Python 标准库。
@@ -16,8 +16,8 @@
 > [!WARNING]
 > **这是 vibe coding 产物。** 代码、样式、脚本和文档主要在和 AI 的
 > “描述 → 生成 → 实测 → 修”循环里产出；需求、验收和发布由作者负责。
-> 它在一台 Debian 13 NAS 上日常使用，但**没有自动化测试，也没有系统性的安全审计**。
-> 不要直接暴露到公网；上重要数据前先备份、先试，并读一下[「安全」](#安全)。
+> 它在一台 Debian 13 NAS 上日常使用，但**没有自动化测试，也没有第三方安全审计**，
+> 只有一份自查式的[安全审查记录](#安全)。不要直接暴露到公网；上重要数据前先备份、先试。
 
 [这是什么](#这是什么) · [功能](#功能一览) · [界面](#界面) · [快速开始](#快速开始) ·
 [可选组件](#可选组件) · [配置](#配置参考) · [备份](#数据与备份) ·
@@ -37,7 +37,7 @@
 
 - 公网直接暴露、多租户、关键业务
 - 开箱即用的相册 / 影音 / RAID 套件（这些请看上游 DebNAS）
-- 替代 Portainer 做完整容器编排：这里只做应用入口、拉镜像和 noVNC 口令
+- 替代 Portainer 做完整容器编排：这里只做应用入口和 noVNC 口令
 
 ## 和上游的关系
 
@@ -52,7 +52,7 @@ WebUI 用 Cockpit + Portainer。本项目借用了它的 NAS 场景，但控制�
 
 ## 功能一览
 
-- **首页**：主机、内存 / 磁盘、应用入口、QQ 动态、实时流量、硬件栏、mihomo
+- **首页**：主机、内存 / 磁盘、应用入口、QQ 消息、音乐库、实时流量、硬件栏、mihomo
 - **共享**：Samba 列表 / 新建 / 编辑 / 删除，导入导出 `smb.conf`
 - **文件**：浏览、上传、下载、删除、新建目录、重命名 / 移动 / 复制
 - **用户**：账号、组（新建 / 删除）、系统密码、Samba 密码、密码策略、SSH 公钥、登录记录
@@ -60,16 +60,19 @@ WebUI 用 Cockpit + Portainer。本项目借用了它的 NAS 场景，但控制�
 - **服务 / 日志**：systemd 启停、journalctl 搜索
 - **终端**：真实 PTY，支持 vim / top / htop / tmux
 - **更新**：`full-upgrade`、无人值守升级、apt 历史
-- **凭据**：AstrBot 控制台账号 / 密码、NapCat WebUI token，在线状态、复制 / 显示、
-  直接打开面板；只在登录后可见
+- **音乐**：Navidrome 状态、曲库统计（曲目 / 专辑 / 艺人 / 占用 / 最近扫描），
+  启动 / 停止 / 重启，一键打开 Web 播放器
+- **凭据**：SnowLuma 控制台密码、noVNC 口令、OneBot accessToken，在线状态、
+  复制 / 显示、直接打开面板；只在登录后可见
 - **虚拟机**：创建、启停、快照、扩容、换盘、删除、浏览器 VNC
-- **其他**：应用自动发现（扫描容器端口和 AstrBot / NapCat 宿主进程）、QQ 动态、
-  mihomo 节点 / 模式 / 测速、API 余额（自动探测多家 key，逐家显示模型与余额）
+- **其他**：应用自动发现（扫描容器端口和 Navidrome 原生端口）、QQ 消息（OneBot 历史 +
+  桥接缓存，图片 / 表情包 / 系统表情）、mihomo 节点 / 模式 / 测速、
+  API 余额（自动探测多家 key，逐家显示模型与余额）
 
 界面默认跟随系统深浅色，手机端有卡片布局和抽屉导航，细节见[「界面」](#界面)。
 
-QQ 动态和凭据页需要本机自己跑 AstrBot（6185）与 NapCat（6099），仓库不负责安装
-这两个服务，配置方法见[「可选组件」](#qq-动态与凭据astrbot--napcat)。
+QQ 消息和凭据页需要本机自己跑 SnowLuma（含 OneBot HTTP）和 qq-bridge，仓库不负责
+安装这些服务，配置方法见[「可选组件」](#qq-消息与凭据)。
 
 ## 界面
 
@@ -87,10 +90,10 @@ QQ 动态和凭据页需要本机自己跑 AstrBot（6185）与 NapCat（6099）
 - **形状与动效**：圆角 10 / 16 / 24 / 28 / 全圆，弹性缓动
   `cubic-bezier(.34, 1.56, .64, 1)`；系统开了「减少动态效果」就直接关掉动画
 - **离线资源**：Inter + Noto Sans SC 子集、图标、noVNC、xterm.js 都随仓库自带
-- **版本**：右侧「系统」块显示 `内核 … · DebNAS 0.1.0`，系统信息里的「界面版本」读
+- **版本**：右侧「系统」块显示 `内核 … · debnas 0.2.6`，系统信息里的「界面版本」读
   同一份 `VERSION`；读不到时统一回落成 `unknown`，右侧不显示版本号
-- **响应式**：宽屏（≥1400px）左右留白栏常驻（左 QQ 动态、右硬件卡 / mihomo /
-  API 余额块）；
+- **响应式**：宽屏（≥1400px）左右留白栏常驻（左 QQ 消息、右硬件卡 / 音乐库 /
+  mihomo / API 余额块）；
   1400–1599px 隐藏消息头像，把宽度让给正文；≤900px 改抽屉导航、凭据页变单列；
   ≤720px 的用户 / 服务 / 更新 / 共享 / 存储 / 网络页改卡片布局
 
@@ -109,8 +112,8 @@ QQ 动态和凭据页需要本机自己跑 AstrBot（6185）与 NapCat（6099）
 ### 安装
 
 ```bash
-git clone https://github.com/huizzz10/dafeiyu_live_in_my_debnas.git ~/my-DebNAS
-cd ~/my-DebNAS
+git clone https://github.com/huizzz10/dafeiyu_live_in_my_debnas.git ~/my-debnas
+cd ~/my-debnas
 sudo ./deploy-web.sh
 ```
 
@@ -178,7 +181,7 @@ sudo ./deploy-web.sh --reinstall-deps # 强制重装依赖
 ### 升级
 
 ```bash
-cd ~/my-DebNAS
+cd ~/my-debnas
 git pull
 sudo ./deploy-web.sh --skip-deps
 ```
@@ -212,64 +215,77 @@ sudo systemctl restart caddy
 ```
 
 apt 依赖、Samba 配置、libvirt 里的虚拟机不在卸载范围内，按需自己清理。
+Navidrome 是用户自己装的（二进制在 `~/.local/opt/`，用户单元在
+`~/.config/systemd/user/`），要卸载按安装时的路径自己删。
 `/var/lib/debnas-web` 也保留着，确认不要媒体缓存再删。
 
 ## 可选组件
 
-### QQ 动态与凭据（AstrBot + NapCat）
+### QQ 消息与凭据
 
-仓库不分发、也不安装这两个服务。想让左侧动态和「凭据」页有内容，需要本机跑：
+仓库不分发、也不安装这些服务。想让左侧消息栏和「凭据」页有内容，需要本机跑：
 
-- **AstrBot**：控制台在 6185，QQ 动态读它的插件历史 `history.jsonl` 和群成员表
-  `members.json`
-- **NapCat**：WebUI 在 6099，凭据页从它的 `webui.json` 读 token
+- **SnowLuma**（rootless podman）：WebUI 在 5099，虚拟屏幕的 noVNC 在 6081
+- **OneBot HTTP**：默认 3000（WebSocket 3001），控制台用
+  `get_group_msg_history` / `get_friend_msg_history` 拉每个会话最近 50 条
+- **qq-bridge**：在 `~/fish/qq-bridge/state/` 下写 `social-v2.json`（会话缓存）和
+  `stickers.json`（表情库）；OneBot 不通时用它兜底
 
-AstrBot 的面板账号密码放在**运行账号**（部署时的 sudo 用户）主目录下，
-建议目录 0700、文件 0600：
+配置目录自动从 rootless podman 的卷里扫
+（`~/.local/share/containers/storage/volumes/*/_data/config`），也可以用
+`DEBNAS_SNOWLUMA_DATA` 指到 SnowLuma 的 `config` 目录；桥接状态默认
+`~/fish/qq-bridge/state/social-v2.json`，可用 `DEBNAS_QQ_STATE` 覆盖。
 
-```bash
-install -d -m 700 ~/.config/debnas-web
-printf '{"astrbot": {"username": "astrbot", "password": "面板密码"}}\n' \
-  > ~/.config/debnas-web/credentials.json
-chmod 600 ~/.config/debnas-web/credentials.json
-```
-
-NapCat 的 token 直接读
-`~/Napcat/opt/QQ/resources/app/app_launcher/napcat/config/webui.json`，装好 NapCat
-就有，不用另配。两条路径可分别用 `DEBNAS_CREDENTIALS_FILE`、`DEBNAS_NAPCAT_WEBUI`
-覆盖。
-
-QQ 号和人设名都不带默认值：`DEBNAS_QQ_BOT_UIN` / `DEBNAS_QQ_OWNER` 填机器人和
-你自己的 QQ 号，不填就只显示「群聊 / 私聊」、头像退回占位图；
-`DEBNAS_QQ_BOT_NAME` / `DEBNAS_QQ_OWNER_NAME` 填两边在消息流里的显示名
-（默认「机器人」「我」）。改法见[「配置参考」](#配置参考)。
+「凭据」页不另存副本，直接读同一个 `config` 目录里的 `webui.json`（控制台密码 /
+token）、`vnc-password`（noVNC 口令）、`onebot.json`（accessToken）。拉历史和换
+图片下载链接用的也是同一个 token。
 
 <details>
-<summary>QQ 动态的数据是怎么拼出来的（实现细节）</summary>
+<summary>QQ 消息的数据是怎么拼出来的（实现细节）</summary>
 
-数据只读不写，**插件日志是唯一来源**：
+数据只读不写，主数据源是 OneBot：
 
-- 插件写的 `astrbot_plugin_feiyu/history.jsonl` 提供毫秒时间、发送者和图片
-- 同目录的 `members.json` 补「昵称 → QQ 号」；老记录没有 `uid` 时，再用
-  `@昵称(QQ号)` 反推一次，两头都对不上才退回首字方块
-- 她发出去的图片 / 表情包从 `journalctl` 里的 `sticker_send`、
-  `send_message_to_user` 反推
-- `stickers.json` 的 `lastUsedAt` 一直当第二来源，日志漏掉的记录也能补回来
-  （和日志按 180 秒去重）
-- 合并后按「会话 + 方向 + 秒 + 文本」去重，同一份消息只留一条；AstrBot 会话库
-  （`data_v4.db`）不再参与：那份数据没有真实发送时间，靠消息里的
-  `Current datetime` 往后顺延会把 20:08 的图排到 18:59
-
-图片按 md5 缓存在 `/var/lib/debnas-web/media/`（`DEBNAS_WEB_STATE` 可改），
-表情包原图优先用插件 `media/` 或 AstrBot `data/temp` 下那一份，GIF 才不会被抽成
-静态帧。
-
-刷新是「前端 3 秒一次定时拉、服务端缓存 1 秒」（`DEBNAS_QQ_FEED_TTL` 可改），
-所以新消息 2~4 秒就上屏。为了让 3 秒一轮不烧 CPU，日志第一次读 24 小时、
-之后只读「上次位置 -2 秒」的增量；最多保留 400 条，群聊 / 私聊各显示最近
-40 条，前端按稳定 id 去重，刷新时不会重复追加。
+- 群 / 私聊历史接口提供真实昵称（群名片优先）、QQ 号和消息段（文本 / 图片 / 表情 /
+  @ / 语音 / 视频占位），每会话最近 50 条
+- 桥接写的 `social-v2.json` 只补最近 5 秒内、还没进 QQ 历史的本地发送；OneBot 超时
+  或没覆盖到的会话整段退回桥接缓存，消息栏不会因为一次超时整段消失
+- 按 `message_id` 与「会话 + 方向 + 文本 + 分钟」双重去重，图片 / 表情占位不参与比较
+- 图片按文件名调 OneBot `get_image` 换一条未过期链接再下载（消息里的 rkey 几十分钟就
+  失效），按文件名缓存在 `/var/lib/debnas-web/media/qqmedia/`；表情包按
+  `stickers.json` 的描述回查 `p.qpic.cn` 链接；系统表情读 SnowLuma 的
+  `sys-face-catalog.json`，没有就读本机 QQ 客户端缓存
+- `/api/qqmedia` 只代理 `qpic.cn` / `qq.com` / `qq.com.cn` 的图片，单张上限 12 MB；
+  文件名只接受 64 位以内的字母数字 + 图片扩展名
+- 前端 3 秒拉一轮（服务端缓存 `DEBNAS_QQ_FEED_TTL`，默认 1 秒），最多保留 400 条，
+  群聊 / 私聊各显示最近 40 条，`localStorage` 记住上次看的会话
 
 </details>
+
+### 音乐库 Navidrome
+
+Navidrome 用官方原生二进制 + systemd **用户**单元，不需要 Docker：
+
+```bash
+./install-navidrome.sh --check              # 只检测，不下载
+./install-navidrome.sh                      # 安装 / 更新到最新版
+./install-navidrome.sh --port 4533 --music ~/music
+```
+
+- 以当前 NAS 账号运行（**不要 sudo**），二进制 `~/.local/opt/navidrome/navidrome`，
+  配置 `~/navidrome/navidrome.toml`，数据 `~/navidrome/data`
+- `deploy-web.sh` 会把脚本副本装到 `/usr/local/lib/debnas-portal/install-navidrome.sh`，
+  没有仓库源码时直接跑它就行（同样用 NAS 账号，不要 sudo）
+- 服务单元是 `navidrome.service`（`systemctl --user`）；开 `loginctl enable-linger`
+  才能开机自启
+- 默认 `MusicFolder = ~/music`、监听 `0.0.0.0:4533`、每分钟扫一次曲库
+- 国内直连 GitHub 常超时，默认走 `gh-proxy.com` 镜像，`DEBNAS_GH_PROXY` 可覆盖
+  （设成空字符串则强制直连）
+- 装好后首页出现音乐库面板和应用入口；面板只读 Navidrome 的 SQLite 库统计
+  （曲目 / 专辑 / 艺人 / 占用 / 最近扫描），启动 / 停止 / 重启走运行账号的用户单元
+
+相关环境变量：`DEBNAS_NAVIDROME_PORT`、`DEBNAS_NAVIDROME_HOME`、
+`DEBNAS_NAVIDROME_BIN`、`DEBNAS_NAVIDROME_DB`、`DEBNAS_NAVIDROME_MUSIC`、
+`DEBNAS_GH_PROXY`。
 
 ### mihomo
 
@@ -290,7 +306,7 @@ sudo ./install-mihomo.sh       # 装到 /usr/local/bin/mihomo
 读环境变量和 `~/.config/*/{env,.env,env.sh}` 里所有以 `_API_KEY` 结尾的变量，按
 DeepSeek → OpenAI → Anthropic → Moonshot → SiliconFlow → DashScope → 智谱 → Gemini →
 xAI → OpenRouter 的顺序排；同名的 `<NAME>_BASE_URL` / `<NAME>_API_BASE` 可以指到自建
-代理，`<NAME>_MODEL` 在读不到 AstrBot 配置时兜底模型名。
+代理，`<NAME>_MODEL` 用于显示模型名。
 
 目前能查余额的：DeepSeek（`/user/balance`）、Moonshot（`/v1/users/me/balance`）、
 SiliconFlow（`/v1/user/info`）、OpenRouter（`/api/v1/credits`）。OpenAI / Anthropic /
@@ -303,8 +319,7 @@ printf 'DEEPSEEK_API_KEY=sk-你的密钥\n' > ~/.config/deepseek/env
 chmod 600 ~/.config/deepseek/env
 ```
 
-模型名从 AstrBot 的 `cmd_config.json` 里读：先按密钥尾号匹配 `provider_sources`，
-再按 base host 匹配，最后退回 `<NAME>_MODEL`；读不到就留空。
+模型名只认 `<NAME>_MODEL`，没配就留空：控制台不去读别的应用的模型配置。
 
 也可以写进 systemd drop-in 的 `Environment=`，但 `systemctl show` 对普通用户也能
 看到环境变量，**更推荐上面这个 0600 文件**。密钥只在服务端读，浏览器只拿到四样
@@ -326,16 +341,17 @@ chmod 600 ~/.config/deepseek/env
 | `DEBNAS_WEB_PORT` | `8080` | 后端监听端口 |
 | `DEBNAS_WEB_STATIC` | `/usr/local/lib/debnas-web/static` | 前端静态目录 |
 | `DEBNAS_WEB_STATE` | `/var/lib/debnas-web` | 状态目录（会话密钥、媒体缓存） |
-| `DEBNAS_WEB_RUN_AS` | 部署时的 sudo 用户 | 运行账号，家目录下找凭据和 AstrBot 数据 |
+| `DEBNAS_WEB_RUN_AS` | 部署时的 sudo 用户 | 运行账号：家目录下找 SnowLuma / qq-bridge / Navidrome 数据 |
 | `DEBNAS_WEB_DEV_USER` | 未设置 | 按 TCP 对端免登录，**生产环境绝对不要设** |
-| `DEBNAS_CREDENTIALS_FILE` | `~/.config/debnas-web/credentials.json` | AstrBot 面板凭据 |
-| `DEBNAS_NAPCAT_WEBUI` | `~/Napcat/…/napcat/config/webui.json` | NapCat token 来源 |
-| `DEBNAS_QQ_HISTORY` | `~/astrbot-src/data/plugin_data/astrbot_plugin_feiyu/history.jsonl` | 插件聊天历史 |
-| `DEBNAS_QQ_FEED_TTL` | `1` | 服务端动态缓存秒数 |
-| `DEBNAS_QQ_BOT_UIN` | 空 | 机器人 QQ 号 |
-| `DEBNAS_QQ_OWNER` | 空 | 本人 QQ 号 |
-| `DEBNAS_QQ_BOT_NAME` | `机器人` | 消息流里机器人的显示名 |
-| `DEBNAS_QQ_OWNER_NAME` | `我` | 消息流里本人的显示名 |
+| `DEBNAS_SNOWLUMA_DATA` | 自动扫 rootless podman 卷 | SnowLuma 的 `config` 目录（凭据页从这里读） |
+| `DEBNAS_QQ_STATE` | `~/fish/qq-bridge/state/social-v2.json` | 桥接会话缓存；`stickers.json` 读同目录 |
+| `DEBNAS_QQ_FEED_TTL` | `1` | 服务端消息缓存秒数 |
+| `DEBNAS_NAVIDROME_PORT` | `4533` | Navidrome 端口 |
+| `DEBNAS_NAVIDROME_HOME` | `~/navidrome` | Navidrome 配置 / 数据目录 |
+| `DEBNAS_NAVIDROME_BIN` | `~/.local/opt/navidrome/navidrome` | Navidrome 二进制路径 |
+| `DEBNAS_NAVIDROME_DB` | `<NAVIDROME_HOME>/data/navidrome.db` | 曲库 SQLite（只读打开） |
+| `DEBNAS_NAVIDROME_MUSIC` | `~/music` | 音乐目录（首次安装写入配置） |
+| `DEBNAS_GH_PROXY` | `https://gh-proxy.com` | `install-navidrome.sh` 的 GitHub 镜像；空串强制直连 |
 | `DEBNAS_MIHOMO_CONFIG` | `/etc/mihomo/config.yaml` | mihomo 配置路径 |
 | `DEBNAS_MIHOMO_BIN` | `/usr/local/bin/mihomo` | mihomo 二进制路径 |
 | `DEBNAS_MIHOMO_API` | 读配置；兜底 `127.0.0.1:9093` | 外部控制器地址 |
@@ -343,7 +359,7 @@ chmod 600 ~/.config/deepseek/env
 | `DEBNAS_DEEPSEEK_TTL` | `60` | 余额缓存秒数（失败 15 秒后重试，手动刷新最少隔 5 秒） |
 | `DEEPSEEK_API_KEY` | 空 | DeepSeek 密钥；任何 `<NAME>_API_KEY` 都会被自动探测 |
 | `<NAME>_BASE_URL` | 空 | 该厂商的自建 / 代理 endpoint（也可写 `<NAME>_API_BASE`） |
-| `<NAME>_MODEL` | 空 | 余额块显示的模型名（读不到 AstrBot 配置时兜底） |
+| `<NAME>_MODEL` | 空 | 余额块显示的模型名 |
 | `DEBNAS_VM_URI` | `qemu:///system` | libvirt 连接 URI |
 | `DEBNAS_VM_IMAGES` | `/var/lib/libvirt/images` | 虚拟机镜像目录 |
 | `DEBNAS_VM_ISO_DIRS` | 空 | 额外 ISO 目录，冒号分隔 |
@@ -362,10 +378,9 @@ sudo systemctl edit debnas-web.service
 
 ```ini
 [Service]
-Environment=DEBNAS_QQ_BOT_UIN=123456789
-Environment=DEBNAS_QQ_OWNER=987654321
-Environment=DEBNAS_QQ_BOT_NAME=小飞
-Environment=DEBNAS_QQ_OWNER_NAME=我
+Environment=DEBNAS_SNOWLUMA_DATA=/home/me/.local/share/containers/storage/volumes/snowluma-config/_data/config
+Environment=DEBNAS_QQ_STATE=/home/me/fish/qq-bridge/state/social-v2.json
+Environment=DEBNAS_NAVIDROME_PORT=4533
 ```
 
 保存后：
@@ -386,26 +401,32 @@ drop-in 存在 `/etc/systemd/system/debnas-web.service.d/override.conf`，
 | `/etc/systemd/system/debnas-web.service*` | 服务定义与 drop-in |
 | `/etc/pam.d/debnas-web` | PAM 服务定义 |
 | `/etc/caddy/Caddyfile` | 反代配置（用了 `--with-caddy` 时） |
-| `~/.config/debnas-web/credentials.json` | AstrBot 面板凭据（0600） |
 | `~/.config/debnas-portal/prefs.json` | 各账号的主题偏好 |
 | `~/.config/<应用>/{env,.env,env.sh}` | API 密钥（0600；余额块会扫这里的 `*_API_KEY`） |
+| `~/navidrome/` | Navidrome 配置与曲库数据库（播放记录 / 收藏在这里） |
+| `~/.local/opt/navidrome/` | Navidrome 二进制（升级时留一份 `.previous`） |
+| `~/fish/qq-bridge/state/` | qq-bridge 的会话缓存与表情库（由桥接自己维护） |
+| `~/.local/share/containers/storage/volumes/*/_data/config/` | SnowLuma 配置（控制台密码 / OneBot token / noVNC 口令） |
 
-真正需要备份的通常只有 `credentials.json`、你的 Caddy 配置，以及自己加的
-systemd drop-in；媒体缓存删了会重新生成。
+真正需要备份的通常只有 Caddy 配置、自己加的 systemd drop-in、API 密钥文件，以及
+`~/navidrome/` 里的数据库（删了会重新扫描曲库，但播放记录 / 收藏会丢）。媒体缓存
+删了会重新生成。
 
 ## 项目结构
 
 ```
-my-DebNAS/
+my-debnas/
 ├── deploy-web.sh          # 部署入口：依赖 → 文件 → systemd → Caddy
 ├── install-deps.sh        # apt 依赖（可重复执行）
 ├── install-mihomo.sh      # 按 CPU 指令集安装 mihomo
+├── install-navidrome.sh   # 原生二进制 + systemd 用户单元装 Navidrome
 ├── add-http-alias.sh      # 给手机 HTTP 访问加备用 IP
 ├── web/
 │   ├── server.py          # 后端：PAM、会话、RPC、PTY、VNC、静态资源
 │   ├── index.html         # 控制台
 │   ├── login.html         # 登录页
 │   ├── status.html        # 状态页
+│   ├── console.html       # 虚拟机 / VNC 控制台
 │   ├── frontend/          # app.js、styles.css、theme.js、字体 / 图标 / xterm / noVNC
 │   ├── helpers/           # samba.py、power_sampler.py、autoupdate.sh、vncpass.sh
 │   ├── debnas-web.service
@@ -423,9 +444,10 @@ my-DebNAS/
 
 ## 安全
 
-**登录账号约等于这台 NAS 的管理员。** 控制台没有按用户分级：
+**登录账号约等于这台 NAS 的管理员。** 控制台没有按用户分级，`debnas-web.service`
+本身也以 root 常驻（`DEBNAS_WEB_RUN_AS` 只是用来定位运行账号的家目录和用户单元）：
 
-- 服务、apt、共享、用户、虚拟机按 root 执行
+- 服务、apt、共享、用户、虚拟机、Navidrome 用户单元按 root 执行
 - 文件页、下载、上传、`file_read` 都以服务进程（root）身份操作任意路径；只有运行
   账号主目录内的写操作会降权。也就是说，任何能通过 PAM 登录的账号都能读
   `/etc/shadow`、别人的家目录，也能往 `/etc` 写文件
@@ -444,21 +466,27 @@ my-DebNAS/
   **生产环境绝对不能设**
 - `/deploy.sh` 是公开安装器，不走登录；不想局域网可下载就删掉
   `/usr/local/lib/debnas-web/static/deploy.sh`
-- 新建的虚拟机 VNC 只监听 `127.0.0.1`；QQ 图片 / 表情代理只认本机缓存里的文件名，
+- 新建的虚拟机 VNC 只监听 `127.0.0.1`；QQ 图片 / 表情代理只放行
+  `qpic.cn` / `qq.com` / `qq.com.cn`，文件名只认字母数字 + 图片扩展名，
   单张上限 12 MB，不接受任意路径
-- 「凭据」页只对已登录会话开放；AstrBot 密码从 0600 的
-  `~/.config/debnas-web/credentials.json` 读，NapCat token 从 `webui.json` 读。
-  页面会把明文交给任何登录账号，和上面「登录账号≈管理员」是同一个前提
+- 「凭据」页只对已登录会话开放，明文来自 SnowLuma 的 `config` 目录（`webui.json`、
+  `onebot.json`、`vnc-password`，都在容器卷里）。页面会把口令 / token 交给任何
+  登录账号，和上面「登录账号≈管理员」是同一个前提
+- QQ 消息栏会显示会话内容、发送者昵称和 QQ 号（含群成员），图片缓存在
+  `/var/lib/debnas-web/media/`；这些是聊天数据，别把控制台共享给不相干的人
 - API 余额块同理：任何登录账号都能看到余额，以及「用的是哪家 key、模型、末 4 位、
   endpoint」。密钥明文只在服务端用，不下发浏览器；探测范围是本机环境变量和
-  `~/.config/*/{env,.env,env.sh}`，里面的 `*_API_KEY` 会读进内存但不会回传；
-  endpoint 是内网地址时只显示「内网端点」。优先放 0600 文件，别写进 unit 的
-  `Environment=`（`systemctl show` 可见）
+  `~/.config/*/{env,.env,env.sh}`，里面的 `*_API_KEY` 会读进内存但不会回传，也不
+  下发密钥所在文件路径；endpoint 是内网地址时只显示「内网端点」。优先放 0600 文件，
+  别写进 unit 的 `Environment=`（`systemctl show` 可见）
 - `install-mihomo.sh` 从 GitHub Releases 直接下载二进制，只走 HTTPS，没有校验哈希；
-  README 里的 `curl -fsSLk … | sudo bash` 为自签证书关掉了 TLS 校验。在意供应链就
-  在可信网络里先下载、看一眼再执行
-- 仓库里不带真实身份：QQ 号、群成员昵称、局域网地址都是环境变量或示例值，默认值
-  只有中性占位
+  `install-navidrome.sh` 默认经第三方镜像 `gh-proxy.com` 下载，只校验文件大小，没有
+  签名 / 哈希。README 里的 `curl -fsSLk … | sudo bash` 为自签证书关掉了 TLS 校验。
+  在意供应链就在可信网络里先下载、看一眼再执行，或把 `DEBNAS_GH_PROXY` 设空强制直连
+- Navidrome 默认监听 `0.0.0.0:4533`，有自己的账号体系；控制台只读它的 SQLite 曲库
+  和用户单元，不代理它的登录。别把 4533 映射到公网
+- 仓库里不带真实身份：QQ 号、群成员昵称、局域网地址都不写死在代码里，默认值只有
+  中性占位或环境变量
 
 如果机器上还有普通 SSH 用户，**强烈建议**在 `/etc/pam.d/debnas-web` 限制只允许
 sudo 组登录（这是目前唯一能把「登录≈root」收窄的一层）：
@@ -469,16 +497,23 @@ account  required  pam_succeed_if.so user ingroup sudo
 
 按你的 PAM 配置调整。
 
-### 2026-11 安全审查（本次）
+### 2026-11-12 安全审查（0.2.6）
 
-- 新增的 QQ 动态字段不带作者 QQ 号 / 人设名默认值，统一走 `DEBNAS_QQ_*`，
-  默认「机器人」「我」
-- `portal_redeploy` 不再接受客户端传入的脚本目录：原来可以指向任意目录里的
-  `deploy-web.sh` 并以 root 执行，属于本地提权；现在只跑部署时发布的 `/deploy.sh`，
-  并要求 sudo 组
-- 多厂商余额块沿用 endpoint 脱敏，不下发密钥来源路径，密钥尾号只在长度 ≥12 时
-  显示；手动刷新保持 5 秒下限
-- `VERSION` 注入 HTML 时按 JSON 转义；静态目录前缀校验补上分隔符
+这轮 0.2.x 功能是在一份比 0.1.0 基线更早的代码上继续改的，审查时发现几处 0.1.0
+已经修过的提权 / 信息泄漏被无意回退，已全部补回：
+
+- `portal_redeploy` 不再接受客户端传入的 `source`：原来可以指向任意目录里的
+  `deploy-web.sh` 并以 root 执行，属于本地提权；现在固定只跑部署时发布的
+  `/deploy.sh`，并重新要求 sudo 组（`api_rpc` 里和 `reboot` 同一个检查）
+- 余额块恢复 endpoint 脱敏和「不把密钥来源路径发给浏览器」；密钥尾号只在长度
+  ≥12 时显示；手动刷新保持 5 秒下限
+- `VERSION` 注入 HTML 时恢复 JSON 字符串转义（`<` 转成 `\u003c`），静态目录前缀
+  校验补回分隔符，`/…/static-evil` 这类兄弟目录不再可达
+- 恢复 6 个脚本的 `100755` 执行位（0.2.x 改动中 `deploy-web.sh` 等掉成了 `100644`，
+  `sudo ./deploy-web.sh` 会直接 Permission denied），新增的 `install-navidrome.sh`
+  也按 `0755` 入库
+- QQ 媒体代理新增 `?u=` 远程链接后复核过：只放行 QQ 系域名，缓存键走 URL 哈希 /
+  文件名，不拼接用户输入
 - 仍然保留的设计：登录账号可借文件页 / 下载 / 上传 / 用户管理以 root 操作任意路径，
   见本节第一条；没有用户级沙箱，也没有自动化测试
 
@@ -495,19 +530,29 @@ account  required  pam_succeed_if.so user ingroup sudo
 - 文件页不是用户级沙箱；跨用户目录可能产生 root 属主文件
 - 上传单文件上限 16 GiB；超大文件或断点续传建议走 SMB
 
-**QQ 动态**
+**QQ 消息**
 
-- 只读插件的 `history.jsonl` 和 `members.json`，默认最近 24 小时、最多 400 条；
-  群聊 / 私聊各显示最近 40 条。时间只认插件记录的毫秒值，不再从会话库推时间，
-  所以会话库里有、插件日志没记的消息不会出现
-- 她发出去的图片 / 表情包靠读 AstrBot 的 systemd 日志反推，日志取法依次试
-  `--file` / `--user-unit` / `--user`，都读不到时只剩 `stickers.json` 的
-  `lastUsedAt` 兜底；表情包要对得上时间点才显示，仍可能缺几条
-- 系统表情读的是本机 QQ 客户端的缓存，换 QQ 版本或清缓存会掉图
+- 主数据源是 OneBot 历史接口，每个会话拉最近 50 条；会话列表来自桥接的
+  `social-v2.json` 和 `get_group_list`，**私聊要先在桥接里出现过**才会显示
+- 群多、OneBot 慢时一轮刷新要等每个会话的 10 秒超时；服务端成品缓存
+  `DEBNAS_QQ_FEED_TTL`（默认 1 秒）、历史拉取 3 秒内复用，拉取失败的那个会话整段
+  退回桥接缓存，所以偶尔会看到「旧一点」的群
+- 图片靠 OneBot `get_image` 换链接后下载并按文件名缓存；消息里的 rkey 过期、或
+  OneBot / SnowLuma 没在跑时，历史图片可能补不回来
+- 表情包要对上 `stickers.json` 的描述、系统表情要有 `sys-face-catalog.json` 或本机
+  QQ 客户端缓存，缺一个就掉图
 - 群成员头像由浏览器直接向 `q1.qlogo.cn` 请求（URL 里带 QQ 号），会向腾讯暴露
   访问者 IP；加载失败自动退回首字方块
-- AstrBot / NapCat 要自己安装并监听 6185 / 6099；凭据页只做展示，AstrBot 面板改密后
-  要手动同步 `credentials.json`
+- SnowLuma 要自己安装并监听 5099 / 6081 / 3000；凭据页只做展示，面板改密后刷新页面
+  就能读到新值（每次都从容器卷里实时读）
+
+**音乐库**
+
+- 面板只做状态和曲库统计，播放要打开 Navidrome；曲库数据库被占用或 schema 变化时
+  统计留空，不影响启动 / 停止
+- Navidrome 是 systemd 用户单元：没开 `loginctl enable-linger` 时，开机 / 用户退出后
+  服务可能不在，面板的启动按钮也依赖运行账号的用户总线
+- `install-navidrome.sh` 只支持 x86_64，默认走第三方镜像且只校验文件大小
 
 **虚拟机与其他**
 
@@ -517,7 +562,7 @@ account  required  pam_succeed_if.so user ingroup sudo
 - 界面是 M3E 风格的 CSS 实现，不是 Google 官方组件库，组件细节不保证与规范逐条对齐
 - API 余额块只显示余额，不做充值和用量明细；能查余额的只有 DeepSeek / Moonshot /
   SiliconFlow / OpenRouter，别家只显示厂商与模型
-- 不包含 RAID 编排、相册、影音套件、Portainer 替代
+- 不包含 RAID 编排、相册、视频播放套件、Portainer 替代
 
 ## 开发与排错
 
@@ -528,8 +573,11 @@ python3 -m py_compile web/server.py
 node --check web/frontend/app.js
 node --check web/api-web.js
 node --check web/cockpit-shim.js
-bash -n deploy-web.sh install-deps.sh install-mihomo.sh add-http-alias.sh
+bash -n deploy-web.sh install-deps.sh install-mihomo.sh install-navidrome.sh add-http-alias.sh
 ```
+
+脚本在 git 里是 `100755`，从压缩包 / U 盘拷回来容易掉执行位，`sudo ./deploy-web.sh`
+报 Permission denied 时先 `ls -l *.sh` 看一眼。
 
 没有测试，欢迎补测试和 PR。常见问题：
 
@@ -540,11 +588,14 @@ bash -n deploy-web.sh install-deps.sh install-mihomo.sh add-http-alias.sh
 | 终端空白 | `/xterm/xterm.js` 是否 200，浏览器控制台报错 |
 | 虚拟机未就绪 | `systemctl status libvirtd` |
 | mihomo API 不可达 | `/etc/mihomo/config.yaml` 的 `external-controller` / `secret` |
-| 凭据页显示「（未配置）」 | `~/.config/debnas-web/credentials.json` 是否存在、0600 |
-| 左侧 QQ 动态空白 | AstrBot 是否在跑，`history.jsonl` 是否有新记录 |
-| 动态里有消息但没图 | 插件 `media/` 或 `data/temp` 里的原图是否还在，`/var/lib/debnas-web/media/` 是否可写 |
-| 群成员头像不显示 | `members.json` 里有没有这个昵称，`q1.qlogo.cn` 是否可达 |
-| 她发的表情包 / 图片不出现 | `journalctl --user-unit astrbot.service` / `journalctl --user -u astrbot` 能不能读到 |
+| 凭据页显示「（未配置）」 | SnowLuma 容器是否在跑，容器卷 `config/` 下有没有 `webui.json` / `onebot.json` / `vnc-password`；`DEBNAS_SNOWLUMA_DATA` 是否指对 |
+| 左侧 QQ 消息空白 | OneBot `http://127.0.0.1:3000` 是否通，`social-v2.json` 是否有会话，`DEBNAS_QQ_STATE` 是否指对 |
+| 有消息但没图 | OneBot `get_image` 是否可用，`/var/lib/debnas-web/media/qqmedia/` 是否可写 |
+| 群成员头像不显示 | 消息里有没有 `uin`，`q1.qlogo.cn` 是否可达 |
+| 表情包 / 系统表情不出现 | `stickers.json` 有没有对应描述、`sys-face-catalog.json` 是否存在、本机 QQ 缓存是否清过 |
+| 音乐库面板显示「未安装」 | `install-navidrome.sh --check` 看二进制路径，跑一次安装脚本 |
+| 音乐库面板有版本但统计为空 | `DEBNAS_NAVIDROME_DB` 指向的 SQLite 是否存在、是否被占用 |
+| 音乐库「启动 / 停止」失败 | 运行账号有没有开 `loginctl enable-linger`，`systemctl --user status navidrome` |
 | 余额块显示「这家没有公开的余额接口」 | 该厂商不在 DeepSeek / Moonshot / SiliconFlow / OpenRouter 里，key 和 endpoint 是否识别对 |
 | 版本显示 `unknown` | `VERSION` 是否随部署装到 `/usr/local/lib/debnas-web/VERSION` |
 | 改了环境变量没生效 | 是否用了 drop-in，`systemctl show debnas-web -p Environment` |
@@ -559,15 +610,19 @@ sudo journalctl -u caddy -n 50 --no-pager
 ## 来源与许可
 
 - [DebNAS](https://github.com/kekylin/debnas)（GPL-3.0）：项目起点与场景参考，不是 fork
-- AstrBot、NapCat：外部部署的 QQ 机器人 / 协议端，仓库只展示状态与凭据，不分发它们
+- SnowLuma、OneBot 协议端、qq-bridge：外部部署的 QQ 控制台 / 消息桥，仓库只展示
+  状态、凭据和消息，不分发它们
+- [Navidrome](https://github.com/navidrome/navidrome)（GPL-3.0）：`install-navidrome.sh`
+  只下载官方 GitHub Release，不打包二进制
 - Cockpit / cockpit-file-sharing / cockpit-identities：早期界面参考，运行时不依赖
 - Debian swirl（Debian Open Use Logo License）、xterm.js（MIT）、
   noVNC（MPL-2.0 / BSD / CC-BY-SA）、Inter 与 Noto CJK（OFL）
 - Debian、libvirt、QEMU、Samba、Caddy、mihomo 等上游项目
 
 完整信息见 [`NOTICE`](NOTICE)。
-仓库不包含 AstrBot / NapCat 的代码，也不下载它们的资源；QQ 系统表情直接读本机
-QQ 客户端的缓存图片，表情包按插件 `stickers.json` 里的地址取一次后缓存在本机。
+仓库不包含 SnowLuma / OneBot / qq-bridge / Navidrome 的代码，也不分发它们的二进制；
+QQ 系统表情直接读 SnowLuma 的表情目录或本机 QQ 客户端缓存，表情包按 `stickers.json`
+里的地址取一次后缓存在本机。
 
 ## 许可
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=DebNAS 独立 WebUI 后端
+Description=debnas 独立 WebUI 后端
 After=network-online.target
 Wants=network-online.target
 
